@@ -9,11 +9,14 @@ end
 
 # Must be mutable for the GC to be able to interact with it
 """
-	Decompressor() -> Decompressor
+	Decompressor()
 
-Create an object to do LibDeflate decompression. The same decompressor cannot be
-used by multiple threads at the same time. To parallelize decompression,
-create multiple instances of `Decompressor` and use one for each thread.
+Create an object which can decompress using the DEFLATE algorithm.
+The same decompressor cannot be used by multiple threads at the same time.
+To parallelize decompression, create multiple instances of `Decompressor`
+and use one for each thread.
+
+See also: [`decompress!`](@ref), [`unsafe_decompress!`](@ref)
 """
 mutable struct Decompressor
 	actual_nbytes_ret::Cint
@@ -36,12 +39,14 @@ function free_decompressor(decompressor::Decompressor)
 end
 
 """
-	Compressor(compresslevel::Int=6) -> Compressor
+	Compressor(compresslevel::Int=6)
 
-Create a `Compressor` which does LibDeflate compression. `compresslevel` can be
-from 1 (fast) to 12 (slow), and defaults to 6. The same compressor cannot be used
-by multiple threads at the same time. To parallelize compression, create
+Create an object which can compress using the DEFLATE algorithm. `compresslevel`
+can be from 1 (fast) to 12 (slow), and defaults to 6. The same compressor cannot
+be used by multiple threads at the same time. To parallelize compression, create
 multiple instances of `Compressor` and use one for each thread.
+
+See also: [`compress!`](@ref), [`unsafe_compress!`](@ref)
 """
 mutable struct Compressor
 	level::Int
@@ -50,7 +55,7 @@ end
 
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Compressor) = x.ptr
 
-function Compressor(compresslevel::Int=6)
+function Compressor(compresslevel::Integer=6)
 	compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
 	ptr = ccall((:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing},
 	            (Cint,), compresslevel)
@@ -91,12 +96,57 @@ function check_return_code(code)
 	end
 end
 
+# Raw C call - do not export this
+function _unsafe_decompress!(decompressor::Decompressor,
+                             outptr::Ptr{UInt8}, outlen::Integer,
+                             inptr::Ptr{UInt8}, inlen::Integer, nptr::Ptr)
+    status = ccall((:libdeflate_deflate_decompress, libdeflate), Cint,
+                  (Ptr{Nothing}, Ptr{UInt8}, Cint, Ptr{UInt8}, Cint, Ptr{Cint}),
+                   decompressor, inptr, inlen, outptr, outlen, nptr)
+    check_return_code(status)
+    return nothing
+end
+
 """
-    decompress!(::Decompressor, outdata, indata, [len::Int]) -> Int
+    unsafe_decompress!(s::IteratorSize, ::Decompressor, outptr, n_out, inptr, n_in)
+
+Decompress `n_in` bytes from `inptr` to `outptr` using the DEFLATE algorithm,
+returning the number of decompressed bytes.
+`s` gives whether you know the decompressed size or not.
+
+If `s` isa `Base.HasLength`, the number of decompressed bytes is given as `n_out`.
+This is more efficient, but will fail if the number is not correct.
+
+If `s` isa `Base.SizeUnknown`, pass the number of available space in the output
+to `n_out`.
+
+See also: [`decompress!`](@ref)
+"""
+function unsafe_decompress! end
+
+function unsafe_decompress!(::Base.HasLength, decompressor::Decompressor,
+                            outptr::Ptr{UInt8}, n_out::Integer,
+                            inptr::Ptr{UInt8}, n_in::Integer)
+    _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, C_NULL)
+    return n_out
+end
+
+function unsafe_decompress!(::Base.SizeUnknown, decompressor::Decompressor,
+                            outptr::Ptr{UInt8}, n_out::Integer,
+                            inptr::Ptr{UInt8}, n_in::Integer)
+    GC.@preserve decompressor begin
+        retptr = pointer_from_objref(decompressor)
+        _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, retptr)
+    end
+    return decompressor.actual_nbytes_ret % Int
+end
+
+"""
+    decompress!(::Decompressor, outdata, indata, [n_out::Integer]) -> Int
 
 Use the passed `Decompressor` to decompress the byte vector `indata` into the
 first bytes of `outdata` using the DEFLATE algorithm.
-If the decompressed size is known beforehand, pass it as `len`. This will increase
+If the decompressed size is known beforehand, pass it as `n_out`. This will increase
 performance, but will fail if it is wrong.
 
 Return the number of bytes written to `outdata`.
@@ -105,28 +155,40 @@ function decompress! end
 
 # Decompress method with length known (preferred)
 function decompress!(decompressor::Decompressor,
-                     outdata::Vector{UInt8}, indata::Vector{UInt8}, len::Int)
-    if length(outdata) < len
-        throw(ValueError("len must be less than or equal to length of outdata"))
+                     outdata::Vector{UInt8}, indata::Vector{UInt8}, n_out::Integer)
+    if length(outdata) < n_out
+        throw(ValueError("n_out must be less than or equal to length of outdata"))
     end
-    status = ccall((:libdeflate_deflate_decompress, libdeflate), Cint,
-                  (Ptr{Nothing}, Ptr{Nothing}, Cint, Ptr{Nothing}, Cint, Ptr{Cint}),
-                   decompressor, indata, length(indata), outdata, len, C_NULL)
-    check_return_code(status)
-    return len
+    GC.@preserve outdata indata unsafe_decompress!(Base.HasLength(),
+        decompressor, pointer(outdata), n_out, pointer(indata), length(indata))
 end
 
 # Decompress method with length unknown (not preferred)
 function decompress!(decompressor::Decompressor,
 		             outdata::Vector{UInt8}, indata::Vector{UInt8})
-    GC.@preserve decompressor begin
-        retptr = Ptr{Cint}(pointer_from_objref(decompressor))
-        status = ccall((:libdeflate_deflate_decompress, libdeflate), Cint,
-                       (Ptr{Nothing}, Ptr{Nothing}, Cint, Ptr{Nothing}, Cint, Ptr{Cint}),
-                       decompressor, indata, length(indata), outdata, length(outdata), retptr)
+    GC.@preserve outdata indata unsafe_decompress!(Base.SizeUnknown(),
+        decompressor, pointer(outdata), length(outdata), pointer(indata), length(indata))
+end
+
+"""
+    unsafe_compress(::Compressor, outptr, n_out, inptr, n_in)
+
+Use the passed `Compressor` to compress `n_in` bytes from the pointer `inptr`
+to the pointer `n_out`. If the compressed size is larger than the available
+space `n_out`, throw an error.
+
+See also: [`compress!`](@ref)
+"""
+function unsafe_compress!(compressor::Compressor, outptr::Ptr{UInt8}, n_out::Integer,
+                          inptr::Ptr{UInt8}, n_in::Integer)
+    bytes = ccall((:libdeflate_deflate_compress, libdeflate), Cint,
+            (Ptr{Nothing}, Ptr{UInt8}, Cint, Ptr{UInt8}, Cint),
+            compressor, inptr, n_in, outptr, n_out)
+
+    if iszero(bytes)
+        throw(LibDeflateError(0, "Output puffer too small"))
     end
-    check_return_code(status)
-    return decompressor.actual_nbytes_ret % Int
+    return bytes % Int
 end
 
 """
@@ -139,29 +201,42 @@ The output must fit in `outdata`. Return the number of bytes written to `outdata
 """
 function compress!(compressor::Compressor,
                    outdata::Vector{UInt8}, indata::Vector{UInt8})
-    bytes = ccall((:libdeflate_deflate_compress, libdeflate), Cint,
-            (Ptr{Nothing}, Ptr{Nothing}, Cint, Ptr{Nothing}, Cint),
-            compressor, indata, length(indata), outdata, length(outdata))
-
-    if iszero(bytes)
-        throw(LibDeflateError(0, "Buffer too small"))
-    end
-    return bytes % Int
+    GC.@preserve outdata indata unsafe_compress!(compressor, pointer(outdata),
+        length(outdata), pointer(indata), length(indata))
 end
 
 """
-    crc32(data, nbytes)
+    unsafe_crc32(inptr, n_in) -> UInt32
 
-Calculate the `UInt32` crc32 checksum of the first `nbytes` of the byte vector `data`.
+Calculate the crc32 checksum of the first `n_in` of the pointer `inptr`.
+Note that crc32 is a different and slower algorithm than the `crc32c` provided
+in the Julia standard library.
+
+See also: [`crc32`](@ref)
 """
-function crc32(data::Vector{UInt8}, nbytes::Int)
+function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer)
     return ccall((:libdeflate_crc32, libdeflate),
-           UInt32, (Cint, Ptr{Nothing}, Cint), 0, data, nbytes % Cint)
+               UInt32, (Cint, Ptr{UInt8}, Cint), 0, inptr, n_in)
+end
+
+"""
+    crc32(data) -> UInt32
+
+Calculate the crc32 checksum of the byte vector `data`.
+Note that crc32 is a different and slower algorithm than the `crc32c` provided
+in the Julia standard library.
+"""
+function crc32(data::Vector{UInt8})
+    GC.@preserve data unsafe_crc32(pointer(data), length(data))
 end
 
 export Decompressor,
        Compressor,
+       unsafe_decompress!,
        decompress!,
-       compress!
+       unsafe_compress!,
+       compress!,
+       unsafe_crc32,
+       crc32
 
 end # module
