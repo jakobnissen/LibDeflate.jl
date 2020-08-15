@@ -1,11 +1,6 @@
 module LibDeflate
 
-using Libdl
-
-const libdeflate = find_library(["libdeflate.so", "libdeflate.so.0"])
-if isempty(libdeflate)
-    throw(ValueError("Cannot find library \"libdeflate\""))
-end
+using libdeflate_jll
 
 # Must be mutable for the GC to be able to interact with it
 """

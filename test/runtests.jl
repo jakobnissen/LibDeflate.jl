@@ -1,5 +1,3 @@
-push!(LOAD_PATH, "../..")
-
 using LibDeflate
 using Test
 
