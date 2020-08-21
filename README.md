@@ -2,9 +2,9 @@
 
 This package provides Julia bindings for [libdeflate](https://github.com/ebiggers/libdeflate).
 
-Libdeflate is a heavily optimized implementation of the DEFLATE compression algorithm. Unlike libz or gzip, libdeflate does not support streaming, and so is intended for use in block compression. But it is significantly faster than either libz or gzip.
+Libdeflate is a heavily optimized implementation of the DEFLATE compression algorithm using in the zip, bgzip and gzip formats. Unlike libz or gzip, libdeflate does not support streaming, and so is intended for use in block compression or for short files. But it is significantly faster than either libz or gzip.
 
-This package provides only a few types and functions. Extra functionality should be built on top of this package. *However*, the `libdeflate` backend offers options to automatically compress and decompress zip and gzip files. If this functionality is desired by users, and it's not easy to implement, make an issue here and I'll consider including it.
+This package provides only simple interfaces for compressing and decompressing raw DEFLATE payloads. Gzip or Zlib functionality should be built on top of this package. *However*, the `libdeflate` backend also offers optimized code for these wrapper format. If this functionality is desired by users, and it's not easy to just implement in your own code, make an issue here and I'll consider including it.
 
 ### Types
 * `Decompressor`: Create an object that decompresses using DEFLATE.
