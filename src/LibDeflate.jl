@@ -4,7 +4,7 @@ using libdeflate_jll
 
 # Must be mutable for the GC to be able to interact with it
 """
-	Decompressor()
+    Decompressor()
 
 Create an object which can decompress using the DEFLATE algorithm.
 The same decompressor cannot be used by multiple threads at the same time.
@@ -14,27 +14,27 @@ and use one for each thread.
 See also: [`decompress!`](@ref), [`unsafe_decompress!`](@ref)
 """
 mutable struct Decompressor
-	actual_nbytes_ret::Cint
-	ptr::Ptr{Nothing}
+    actual_nbytes_ret::Cint
+    ptr::Ptr{Nothing}
 end
 
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Decompressor) = x.ptr
 
 function Decompressor()
-	decompressor = Decompressor(0, ccall((:libdeflate_alloc_decompressor, 
-	               libdeflate), Ptr{Nothing}, ()))
-	finalizer(free_decompressor, decompressor)
-	return decompressor
+    decompressor = Decompressor(0, ccall((:libdeflate_alloc_decompressor, 
+                   libdeflate), Ptr{Nothing}, ()))
+    finalizer(free_decompressor, decompressor)
+    return decompressor
 end
 
 function free_decompressor(decompressor::Decompressor)
-	ccall((:libdeflate_free_decompressor, libdeflate), 
-	       Nothing, (Ptr{Nothing},), decompressor)
-	return nothing
+    ccall((:libdeflate_free_decompressor, libdeflate), 
+           Nothing, (Ptr{Nothing},), decompressor)
+    return nothing
 end
 
 """
-	Compressor(compresslevel::Int=6)
+    Compressor(compresslevel::Int=6)
 
 Create an object which can compress using the DEFLATE algorithm. `compresslevel`
 can be from 1 (fast) to 12 (slow), and defaults to 6. The same compressor cannot
@@ -44,24 +44,24 @@ multiple instances of `Compressor` and use one for each thread.
 See also: [`compress!`](@ref), [`unsafe_compress!`](@ref)
 """
 mutable struct Compressor
-	level::Int
-	ptr::Ptr{Nothing}
+    level::Int
+    ptr::Ptr{Nothing}
 end
 
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Compressor) = x.ptr
 
 function Compressor(compresslevel::Integer=6)
-	compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
-	ptr = ccall((:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing},
-	            (Cint,), compresslevel)
-	compressor = Compressor(compresslevel, ptr)
-	finalizer(free_compressor, compressor)
-	return compressor
+    compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
+    ptr = ccall((:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing},
+                (Cint,), compresslevel)
+    compressor = Compressor(compresslevel, ptr)
+    finalizer(free_compressor, compressor)
+    return compressor
 end
 
 function free_compressor(compressor::Compressor)
-	ccall((:libdeflate_free_compressor, libdeflate), Nothing, (Ptr{Nothing},), compressor)
-	return nothing
+    ccall((:libdeflate_free_compressor, libdeflate), Nothing, (Ptr{Nothing},), compressor)
+    return nothing
 end
 
 # Compression and decompression functions
@@ -72,23 +72,23 @@ const LIBDEFLATE_SHORT_INPUT        = Cint(2)
 const LIBDEFLATE_INSUFFICIENT_SPACE = Cint(3)
 
 """
-	LibDeflateError(code::Int, message::String)
+    LibDeflateError(code::Int, message::String)
 
 `LibDeflate` failed with error code `code`.
 """
 struct LibDeflateError <: Exception
-	code::Int
-	msg::String
+    code::Int
+    msg::String
 end
 
 function check_return_code(code)
-	if code == LIBDEFLATE_BAD_DATA
-		throw(LibDeflateError(LIBDEFLATE_BAD_DATA, "Bad data"))
-	elseif code == LIBDEFLATE_SHORT_INPUT
-		throw(LibDeflateError(LIBDEFLATE_SHORT_INPUT, "Short input"))
-	elseif code == LIBDEFLATE_INSUFFICIENT_SPACE
-		throw(LibDeflateError(LIBDEFLATE_INSUFFICIENT_SPACE, "Insufficient space"))
-	end
+    if code == LIBDEFLATE_BAD_DATA
+        throw(LibDeflateError(LIBDEFLATE_BAD_DATA, "Bad data"))
+    elseif code == LIBDEFLATE_SHORT_INPUT
+        throw(LibDeflateError(LIBDEFLATE_SHORT_INPUT, "Short input"))
+    elseif code == LIBDEFLATE_INSUFFICIENT_SPACE
+        throw(LibDeflateError(LIBDEFLATE_INSUFFICIENT_SPACE, "Insufficient space"))
+    end
 end
 
 # Raw C call - do not export this
@@ -160,7 +160,7 @@ end
 
 # Decompress method with length unknown (not preferred)
 function decompress!(decompressor::Decompressor,
-		             outdata::Vector{UInt8}, indata::Vector{UInt8})
+                     outdata::Vector{UInt8}, indata::Vector{UInt8})
     GC.@preserve outdata indata unsafe_decompress!(Base.SizeUnknown(),
         decompressor, pointer(outdata), length(outdata), pointer(indata), length(indata))
 end
