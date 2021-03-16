@@ -14,7 +14,7 @@ and use one for each thread.
 See also: [`decompress!`](@ref), [`unsafe_decompress!`](@ref)
 """
 mutable struct Decompressor
-    actual_nbytes_ret::Cint
+    actual_nbytes_ret::UInt
     ptr::Ptr{Nothing}
 end
 
@@ -53,7 +53,7 @@ Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Compressor) = x.ptr
 function Compressor(compresslevel::Integer=6)
     compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
     ptr = ccall((:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing},
-                (Cint,), compresslevel)
+                (UInt,), compresslevel)
     compressor = Compressor(compresslevel, ptr)
     finalizer(free_compressor, compressor)
     return compressor
@@ -95,8 +95,8 @@ end
 function _unsafe_decompress!(decompressor::Decompressor,
                              outptr::Ptr{UInt8}, outlen::Integer,
                              inptr::Ptr{UInt8}, inlen::Integer, nptr::Ptr)
-    status = ccall((:libdeflate_deflate_decompress, libdeflate), Cint,
-                  (Ptr{Nothing}, Ptr{UInt8}, Cint, Ptr{UInt8}, Cint, Ptr{Cint}),
+    status = ccall((:libdeflate_deflate_decompress, libdeflate), UInt,
+                  (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt, Ptr{UInt}),
                    decompressor, inptr, inlen, outptr, outlen, nptr)
     check_return_code(status)
     return nothing
@@ -176,8 +176,8 @@ See also: [`compress!`](@ref)
 """
 function unsafe_compress!(compressor::Compressor, outptr::Ptr{UInt8}, n_out::Integer,
                           inptr::Ptr{UInt8}, n_in::Integer)
-    bytes = ccall((:libdeflate_deflate_compress, libdeflate), Cint,
-            (Ptr{Nothing}, Ptr{UInt8}, Cint, Ptr{UInt8}, Cint),
+    bytes = ccall((:libdeflate_deflate_compress, libdeflate), UInt,
+            (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt),
             compressor, inptr, n_in, outptr, n_out)
 
     if iszero(bytes)
@@ -211,7 +211,7 @@ See also: [`crc32`](@ref)
 """
 function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer)
     return ccall((:libdeflate_crc32, libdeflate),
-               UInt32, (Cint, Ptr{UInt8}, Cint), 0, inptr, n_in)
+               UInt32, (UInt, Ptr{UInt8}, UInt), 0, inptr, n_in)
 end
 
 """
