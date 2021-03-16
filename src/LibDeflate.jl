@@ -1,6 +1,7 @@
 module LibDeflate
 
 using libdeflate_jll
+using ScanByte
 
 # Must be mutable for the GC to be able to interact with it
 """
@@ -224,6 +225,8 @@ in the Julia standard library.
 function crc32(data::Vector{UInt8})
     GC.@preserve data unsafe_crc32(pointer(data), length(data))
 end
+
+include("gzip.jl")
 
 export Decompressor,
        Compressor,
