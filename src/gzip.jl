@@ -23,9 +23,9 @@ It has the following fields, all of type ``.
 struct GzipDecompressResult
     len::UInt32
     reserved::UInt32 # for alignment, reserve for future versions
-    extra::UnitRange{UInt32}
     filename::UnitRange{UInt32}
     comment::UnitRange{UInt32}
+    extra::Union{Nothing, Vector{ExtraField}}
 end
 
 # TODO: Merge this with the other LibDeflateError
@@ -44,10 +44,45 @@ end
         "Input data too short"
     elseif code == 7
         "Extra data too long"
+    elseif code == 8
+        "Extra data invalid"
     end
     throw(LibDeflateError(code, message))
 end
 
+"""
+    gzip_decompress!(::Decompressor, out::Vector{UInt8}, in::Vector{UInt8}, max_len=typemax(Int))
+
+Gzip decompress the input data into `out`, and resize `out` to fit. Throws an error
+if `out` would be resized to larger than `max_len`. Returns a `GzipDecompressResult`.
+
+See also: [`unsafe_gzip_decompress!`](@ref)
+"""
+function gzip_decompress!(
+    decompressor::Decompressor,
+    out_data::Vector{UInt8},
+    in_data::Vector{UInt8};
+    max_len::Integer=typemax(Int),
+)
+    result = unsafe_gzip_decompress!(decompressor, out_data, UInt(max_len),
+    pointer(in_data), length(in_data) % UInt)
+
+    length(out_data) == result.len || resize!(out_data, result.len)
+    return result
+end
+
+"""
+    unsafe_gzip_decompress!(decompressor::Decompressor, outdata::Vector{UInt8},
+        max_outlen::UInt, in_ptr::Ptr{UInt8}, len::UInt)
+
+Use the `Decompressor` to decompress gzip data at `in_ptr` and `len` bytes forward
+into `outdata`. If there is not enough room at `outdata`, resize `outdata`, except
+if it would be biffer than `max_outlen`, in that case throw an error.
+
+Return a `GzipDecompressResult`
+
+See also: [`gzip_decompress!`](@ref)
+"""
 function unsafe_gzip_decompress!(
     decompressor::Decompressor, 
     out_data::Vector{UInt8}, 
@@ -153,7 +188,88 @@ function max_out_len(input_len::UInt, comment_len::UInt, filename_len::UInt, ext
     return len
 end
 
-# Returns length of compressed data (Int)
+"""
+    gzip_compress!(
+        compressor::Compressor,
+        output::Vector{UInt8},
+        input::Vector{UInt8},
+        comment::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+        filename::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+        extra::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+        crc_header::Bool=false
+    )
+
+Gzip compress `input` into `output` and resizing output to fit. Returns `output`.
+
+Adds optional data `comment`, `filename`, `extra` and `crc_header`:
+* `comment` and `filename` must not include the byte `0x00`.
+* `extra` must be at most `typemax(UInt16)` bytes long.
+* `crc_header` is true, add the header CRC checksum.
+
+See also: [`unsafe_gzip_compress!`](@ref)
+"""
+function gzip_compress!(
+    compressor::Compressor,
+    output::Vector{UInt8},
+    input::Vector{UInt8};
+    comment::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+    filename::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+    extra::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+    crc_header::Bool=false
+)
+    # Resize output to maximal possible length
+    maxlen = max_out_len(
+        length(input),
+        comment === nothing ? UInt(0) : ncodeunits(comment),
+        filename === nothing ? UInt(0) : ncodeunits(filename),
+        extra === nothing ? UInt16(0) : ncodeunits(coextramment),
+        header_crc
+    )
+    resize!(output, maxlen)
+
+    mem_comment = comment === nothing ? nothing : SizedMemory(comment)
+    mem_filename = filename === nothing ? nothing : SizedMemory(filename)
+    mem_extra = extra === nothing ? nothing : SizedMemory(extra)
+
+    n_bytes = unsafe_gzip_compress!(
+        compressor,
+        pointer(output),
+        length(output) % UInt,
+        pointer(input),
+        length(input) % UInt,
+        comment,
+        filename,
+        extra,
+        crc_header
+    )
+
+    resize!(output, n_bytes % UInt)
+    return output
+end
+
+"""
+    unsafe_gzip_compress!(
+        compressor::Compressor,
+        out_ptr::Ptr{UInt8}, out_len::UInt,
+        in_ptr::Ptr{UInt8}, in_len::UInt,
+        comment::Union{ScanByte.SizedMemory, Nothing},
+        filename::Union{ScanByte.SizedMemory, Nothing},
+        extra::Union{ScanByte.SizedMemory, Nothing},
+        crc_header::Bool
+    )::Int
+
+Use the `Compressor` to gzip compress input `in_len` bytes from `in_ptr`, into `out_ptr`.
+If the resulting gzip data could be longer than `out_len`, throw an error.
+Optionally, include gzip comment, filename or extra data. These should be represented
+by a `SizedMemory` object, or `nothing` if it should be skipped.
+* `comment` and `filename` must not include the byte `0x00`.
+* `extra` must be at most `typemax(UInt16)` bytes long.
+If `crc_header` is true, add the header CRC checksum.
+
+Returns the number of bytes written to `out_ptr`.
+
+See also: [`gzip_compress!`](@ref)
+"""
 function unsafe_gzip_compress!(
     compressor::Compressor,
     out_ptr::Ptr{UInt8},
@@ -202,8 +318,8 @@ function unsafe_gzip_compress!(
     # Add system time (take lower 32 bits if it overflows)
     unsafe_store!(Ptr{UInt32}(ptr + 5), htol(unsafe_trunc(UInt32, time())))
 
-    # Add system (always UNIX) and XFL (zero)
-    unsafe_store!(Ptr{UInt16}(ptr + 9), htol(0x0003))
+    # Add system (unknown) and XFL (zero)
+    unsafe_store!(Ptr{UInt16}(ptr + 9), htol(0x00ff))
 
     index = UInt(11)
     
@@ -249,3 +365,37 @@ function unsafe_gzip_compress!(
     unsafe_store!(Ptr{UInt32}(ptr + index), htol(in_len % UInt32))
     return (index + 3) % Int # 4 bytes isize - off-by-one
 end
+
+struct ExtraField
+    s1::UInt8
+    s2::UInt8
+    data::UnitRange{UInt32}
+end
+
+# The pointer points to the first byte of the first field
+function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
+    fields = ExtraField[]
+    while !iszero(remaining_bytes)
+        field = parse_extra_field(ptr, index, remaining_bytes)
+        push!(fields, field)
+        field_len = 2 + length(field.data)
+        remaining_bytes -= field_len
+        ptr += field_len
+    end
+    return fields
+end
+
+# The pointer points to the first byte of the extra fields
+function parse_extra_field(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
+    remaining_bytes < 4 && gzip_error(7)
+    s1 = unsafe_load(ptr)
+    s2 = unsafe_load(ptr + 1)
+    iszero(s2) && gzip_error(8) # not allowed
+    field_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + 2)))
+    field_len + 4 > remaining_bytes && gzip_error(7)
+    range = index+UInt32(3):index+UInt32(2)+field_len
+    return ExtraField(s1, s2, range)
+end
+
+
+
