@@ -73,23 +73,24 @@ const LIBDEFLATE_SHORT_INPUT        = Cint(2)
 const LIBDEFLATE_INSUFFICIENT_SPACE = Cint(3)
 
 """
-    LibDeflateError(code::Int, message::String)
+    LibDeflateError(message::String)
 
-`LibDeflate` failed with error code `code`.
+`LibDeflate` failed with `message`.
 """
 struct LibDeflateError <: Exception
-    code::Int
     msg::String
 end
 
-function check_return_code(code)
-    if code == LIBDEFLATE_BAD_DATA
-        throw(LibDeflateError(LIBDEFLATE_BAD_DATA, "Bad data"))
+@noinline function check_return_code(code)
+    iszero(code) && return nothing
+    message = if code == LIBDEFLATE_BAD_DATA
+        "libdeflate 1: bad data"
     elseif code == LIBDEFLATE_SHORT_INPUT
-        throw(LibDeflateError(LIBDEFLATE_SHORT_INPUT, "Short input"))
+        "libdeflate 2: short input"
     elseif code == LIBDEFLATE_INSUFFICIENT_SPACE
-        throw(LibDeflateError(LIBDEFLATE_INSUFFICIENT_SPACE, "Insufficient space"))
+        "libdeflate 2: insufficient space"
     end
+    throw(LibDeflateError(message))
 end
 
 # Raw C call - do not export this
@@ -182,7 +183,7 @@ function unsafe_compress!(compressor::Compressor, outptr::Ptr{UInt8}, n_out::Int
             compressor, inptr, n_in, outptr, n_out)
 
     if iszero(bytes)
-        throw(LibDeflateError(0, "Output puffer too small"))
+        throw(LibDeflateError("Output buffer too small"))
     end
     return bytes % Int
 end
@@ -230,11 +231,17 @@ include("gzip.jl")
 
 export Decompressor,
        Compressor,
+       LibDeflateError,
        unsafe_decompress!,
        decompress!,
+       unsafe_gzip_decompress!,
+       gzip_decompress!,
        unsafe_compress!,
        compress!,
+       unsafe_gzip_compress!,
+       gzip_compress!,
        unsafe_crc32,
-       crc32
+       crc32,
+       is_valid_extra_data
 
 end # module

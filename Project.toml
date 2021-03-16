@@ -1,7 +1,7 @@
 name = "LibDeflate"
 uuid = "9255714d-24a7-4b30-8ea3-d46a97f7e13b"
 authors = ["Jakob Nybo Nissen <jakobnybonissen@gmail.com>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 ScanByte = "7b38b023-a4d7-4c5e-8d43-3f3097f304eb"
@@ -12,6 +12,7 @@ julia = "1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 
 [targets]
-test = ["Test"]
+test = ["Test", "CodecZlib"]
