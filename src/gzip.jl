@@ -26,9 +26,14 @@ function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
     while !iszero(remaining_bytes)
         field = parse_extra_field(ptr, index, remaining_bytes)
         push!(fields, field)
-        field_len = (last(field.data) - first(field.data)) % UInt16 + UInt16(1) + UInt16(4)
-        remaining_bytes -= field_len
-        ptr += field_len
+        
+        # We zero the range field on an empty subfield, so we take
+        # that possibility into account
+        field_len = ifelse(iszero(first(field.data)), zero(UInt32), last(field.data) - first(field.data) + UInt32(1))
+        total_len = field_len % UInt16 + UInt16(4)
+        remaining_bytes -= total_len
+        ptr += total_len
+        index += total_len
     end
     return fields
 end
@@ -41,7 +46,13 @@ function parse_extra_field(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt
     iszero(s2) && gzip_error(8) # not allowed
     field_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + 2)))
     field_len + 4 > remaining_bytes && gzip_error(7)
-    range = index+UInt32(4):index+UInt32(4)-UInt32(1)+field_len
+    
+    # If the field is empty, we zero out the range and return that
+    range = if iszero(field_len)
+        UInt32(0):UInt32(0)
+    else
+        index+UInt32(4):index+UInt32(4)-UInt32(1)+field_len
+    end
     return GzipExtraField((s1, s2), range)
 end
 
@@ -276,9 +287,9 @@ function gzip_compress!(
     # Resize output to maximal possible length
     maxlen = max_out_len(
         sizeof(input) % UInt,
-        comment === nothing ? UInt(0) : ncodeunits(comment) % UInt,
-        filename === nothing ? UInt(0) : ncodeunits(filename) % UInt,
-        extra === nothing ? UInt16(0) : ncodeunits(extra) % UInt16,
+        comment === nothing ? UInt(0) : sizeof(comment) % UInt,
+        filename === nothing ? UInt(0) : sizeof(filename) % UInt,
+        extra === nothing ? UInt16(0) : sizeof(extra) % UInt16,
         header_crc
     )
     # We add 8 extra bytes to make sure Libdeflate don't error due to off-by-one errors 
@@ -367,7 +378,7 @@ function unsafe_gzip_compress!(
     end
     if extra !== nothing
         # Validate extra data
-        is_valid_extra_data(pointer(extra), length(extra)) || gzip_error(8)
+        is_valid_extra_data(pointer(extra), length(extra) % UInt16) || gzip_error(8)
         header |= 0x04000000
     end
     header = ifelse(header_crc, header | 0x02000000, header)

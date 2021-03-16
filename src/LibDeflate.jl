@@ -203,28 +203,29 @@ function compress!(compressor::Compressor,
 end
 
 """
-    unsafe_crc32(inptr, n_in) -> UInt32
+    unsafe_crc32(inptr, n_in, start) -> UInt32
 
-Calculate the crc32 checksum of the first `n_in` of the pointer `inptr`.
+Calculate the crc32 checksum of the first `n_in` of the pointer `inptr`,
+with seed `start` (default is 0).
 Note that crc32 is a different and slower algorithm than the `crc32c` provided
 in the Julia standard library.
 
 See also: [`crc32`](@ref)
 """
-function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer)
+function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer, start::UInt32=UInt32(0))
     return ccall((:libdeflate_crc32, libdeflate),
-               UInt32, (UInt, Ptr{UInt8}, UInt), 0, inptr, n_in)
+               UInt32, (UInt, Ptr{UInt8}, UInt), start, inptr, n_in)
 end
 
 """
-    crc32(data) -> UInt32
+    crc32(data, start=UInt32(0)) -> UInt32
 
-Calculate the crc32 checksum of the byte vector `data`.
+Calculate the crc32 checksum of the byte vector `data` and seed `start`.
 Note that crc32 is a different and slower algorithm than the `crc32c` provided
 in the Julia standard library.
 """
-function crc32(data::Vector{UInt8})
-    GC.@preserve data unsafe_crc32(pointer(data), length(data))
+function crc32(data::Vector{UInt8}, start::UInt32=UInt32(0))
+    GC.@preserve data unsafe_crc32(pointer(data), length(data), start)
 end
 
 include("gzip.jl")

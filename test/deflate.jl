@@ -54,6 +54,14 @@ end
     end
 end
 
+# Unsafe CRC is implicitly tested by decompressing gzip with
+# codeczlib. So we can just compare it to the unsafe one
+@testset "Safe CRC" begin
+    for testdata in ["", "foo", "abracadabra!"]
+        @test crc32(collect(codeunits(testdata))) == unsafe_crc32(pointer(testdata), ncodeunits(testdata))
+    end
+end
+
 @testset "Round trip" begin
     INPUT_DATA = [
         "",

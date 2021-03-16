@@ -63,7 +63,7 @@ test_filename = "testfile.foo"
 
         gzip_compress!(
             compressor, outdata, data;
-            comment=test_comment, filename=test_filename, extra=nothing, header_crc=false
+            comment=test_comment, filename=test_filename, extra=data_test_cases[1], header_crc=false
         )
         decompressed = transcode(GzipDecompressor, outdata)
         @test decompressed == Vector{UInt8}(data)
@@ -72,6 +72,34 @@ test_filename = "testfile.foo"
         resize!(outdata, 1250)
     end
 end
+
+
+complex_test_case = UInt8[
+    # header
+    0x1f, 0x8b, 0x08, 0x1e, 0xb3, 0x2c, 0x51, 0x60, 0xff, 0x00,
+
+    # Extra data
+    0x0a, 0x00, 0x42, 0x43, 0x02, 0x00, 0xa1, 0x4c,
+    0x02, 0x03, 0x00, 0x00,
+
+    # Filename: "filename.fna"
+    0x66, 0x69, 0x6c, 0x65, 0x6e, 0x61, 0x6d, 0x65, 0x2e, 0x66, 0x6e, 0x61, 0x00,
+
+    # Complicated unicode comment "αβ学中文"
+    0xce, 0xb1, 0xce, 0xb2, 0xe5, 0xad, 0xa6, 0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87, 0x00,
+
+    # CRC16
+    0x78, 0x18,
+    
+    # Data: compressed "Abracadabra"
+    0x01, 0x0b, 0x00, 0xf4, 0xff, 0x41, 0x62, 0x72, 0x61, 0x63, 0x61, 0x64, 0x61, 0x62, 0x72, 0x61,
+    
+    # CRC32
+    0x60, 0x76, 0x76, 0x91,
+    
+    # isize
+    0x0b, 0x00, 0x00, 0x00
+]
 
 @testset "Decompression" begin
     decompressor = Decompressor()
@@ -90,6 +118,19 @@ end
         @test outdata[1:result.len] == Vector{UInt8}(data)
 
         resize!(outdata, 5)
-
     end
+
+    # Hard test case
+    res = gzip_decompress!(decompressor, outdata, complex_test_case)
+    @test res.len == 11
+    @test res.mtime == 0x60512cb3
+    @test length(res.extra) == 2
+    @test first(res.extra).tag == (0x42, 0x43)
+    @test first(res.extra).data == 0x00000011:0x00000012
+    @test last(res.extra).tag == (0x02, 0x03)
+    @test last(res.extra).data == 0x00000000:0x00000000
+    @test String(complex_test_case[res.filename]) == "filename.fna"
+    @test String(complex_test_case[res.comment]) == "αβ学中文"
+    @test String(copy(outdata)) == "Abracadabra"
+
 end
