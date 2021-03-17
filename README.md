@@ -2,9 +2,9 @@
 
 This package provides Julia bindings for [libdeflate](https://github.com/ebiggers/libdeflate).
 
-Libdeflate is a heavily optimized implementation of the DEFLATE compression algorithm using in the zip, bgzip and gzip formats. Unlike libz or gzip, libdeflate does not support streaming, and so is intended for use in block compression or for short files. But it is significantly faster than either libz or gzip.
+Libdeflate is a heavily optimized implementation of the DEFLATE compression algorithm used in the zip, bgzip and gzip formats. Unlike libz or gzip, libdeflate does not support streaming, and so is intended for use in of files that fit in-memory or for block-compressed files like bgzip. But it is significantly faster than either libz or gzip.
 
-This package provides simple for compressing and decompressing raw DEFLATE payloads and gzip data. It is intended for internal use by other packages, not to be used directly by users. Hence, its interface is somewhat small.
+This package provides simple functionality for working with raw DEFLATE payloads and gzip data. It is intended for internal use by other packages, not to be used directly by users. Hence, its interface is somewhat small.
 
 For more details on the API, read the docstrings for the relevant functions.
 
@@ -14,17 +14,17 @@ For more details on the API, read the docstrings for the relevant functions.
 * `LibDeflateError(::String)`: An `Exception` type for this package.
 
 ### Exported functions
-* `unsafe_decompress!`: Decompress data from one pointer to another using a `Decompressor`
-* `decompress!`: Deompress a byte vector into another byte vector using a `Decompressor`.
-* `unsafe_gzip_decompress!`: Decompress data from a pointer to another, yielding a `GzipDecompressResult`
+* `unsafe_decompress!`: DEFLATE decompress data from one pointer to another
+* `decompress!`: DEFLATE decompress a byte vector into another byte vector
+* `unsafe_gzip_decompress!`: Gzip decompress data from a pointer to another, yielding a `GzipDecompressResult`.
 * `gzip_decompress!`: Same as `unsafe_gzip_decompress!`, but works on vectors, resizing output to fit.
-* `unsafe_compress`: Compress data from one pointer to another using a `Compressor`
-* `compress!`: Compress a byte vector into another byte vector using a `Compressor`.
+* `unsafe_compress`: DEFLATE compress data from one pointer to another
+* `compress!`: DEFLATE compress a byte vector into another byte vector
 * `unsafe_gzip_compress!`: Compress data from a pointer in gzip format.
 * `gzip_compress!`: Same as `unsafe_gzip_compress!`, but works on vectors.
 * `unsafe_crc32`: Compute the crc32 checksum of data obtained from a pointer.
 * `crc32`: Compute the crc32 checksum of the byte vector `data`.
-* `is_valid_extra_data`
+* `is_valid_extra_data`: Checks if data at pointer is valid gzip "extra fields".
 
 ## Example usage
 ```julia

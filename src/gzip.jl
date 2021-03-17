@@ -102,7 +102,7 @@ and `comment` specify the location of gzip feature data in the input vector.
 When not applicable (e.g. the `comemnt` field is not applicable for gzip files 
 without the `FCOMMENT` flag), these fields are zeroed out.
 
-It has the following fields, all of type ``.
+It has the following fields:
 * `len::UInt32` length of decompressed data
 * `mtime::UInt32` timestamp of original data, or zero
 * `filename::UnitRange{UInt32}` location of filename (or zero)
@@ -139,7 +139,8 @@ end
 end
 
 """
-    gzip_decompress!(::Decompressor, out::Vector{UInt8}, in::Vector{UInt8}, max_len=typemax(Int))
+    gzip_decompress!(::Decompressor, out::Vector{UInt8}, in::Vector{UInt8},
+        max_len=typemax(Int))
 
 Gzip decompress the input data into `out`, and resize `out` to fit. Throws an error
 if `out` would be resized to larger than `max_len`. Returns a `GzipDecompressResult`.
