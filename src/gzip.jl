@@ -153,8 +153,12 @@ function gzip_decompress!(
     in_data::Union{Vector{UInt8}, String, SubString{String}};
     max_len::Integer=typemax(Int),
 )
-    result = unsafe_gzip_decompress!(decompressor, out_data, UInt(max_len),
-    pointer(in_data), sizeof(in_data) % UInt)
+    GC.@preserve in_data out_data begin
+        result = unsafe_gzip_decompress!(
+            decompressor, out_data, UInt(max_len),
+            pointer(in_data), sizeof(in_data) % UInt
+        )
+    end
 
     length(out_data) == result.len || resize!(out_data, result.len)
     return result
@@ -320,21 +324,23 @@ function gzip_compress!(
     # We add 8 extra bytes to make sure Libdeflate don't error due to off-by-one errors 
     resize!(output, maxlen + 8)
 
-    mem_comment = comment === nothing ? nothing : SizedMemory(comment)
-    mem_filename = filename === nothing ? nothing : SizedMemory(filename)
-    mem_extra = extra === nothing ? nothing : SizedMemory(extra)
+    GC.@preserve output input comment filename extra begin
+        mem_comment = comment === nothing ? nothing : SizedMemory(comment)
+        mem_filename = filename === nothing ? nothing : SizedMemory(filename)
+        mem_extra = extra === nothing ? nothing : SizedMemory(extra)
 
-    n_bytes = unsafe_gzip_compress!(
-        compressor,
-        pointer(output),
-        sizeof(output) % UInt,
-        pointer(input),
-        sizeof(input) % UInt,
-        mem_comment,
-        mem_filename,
-        mem_extra,
-        header_crc
-    )
+        n_bytes = unsafe_gzip_compress!(
+            compressor,
+            pointer(output),
+            sizeof(output) % UInt,
+            pointer(input),
+            sizeof(input) % UInt,
+            mem_comment,
+            mem_filename,
+            mem_extra,
+            header_crc
+        )
+    end
 
     resize!(output, n_bytes % UInt)
     return output
