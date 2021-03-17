@@ -1,7 +1,6 @@
 module LibDeflate
 
 using libdeflate_jll
-using ScanByte
 
 # Must be mutable for the GC to be able to interact with it
 """

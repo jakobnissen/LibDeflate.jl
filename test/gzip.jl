@@ -55,7 +55,7 @@ test_filename = "testfile.foo"
         n_bytes = unsafe_gzip_compress!(
             compressor, pointer(outdata), UInt(length(outdata)),
             pointer(data), UInt(sizeof(data)),
-            ScanByte.SizedMemory(test_comment), ScanByte.SizedMemory(test_filename),
+            LibDeflate.SizedMemory(test_comment), LibDeflate.SizedMemory(test_filename),
             nothing, true
         )
         decompressed = transcode(GzipDecompressor, outdata[1:n_bytes])
@@ -128,7 +128,7 @@ complex_test_case = UInt8[
     @test first(res.extra).tag == (0x42, 0x43)
     @test first(res.extra).data == 0x00000011:0x00000012
     @test last(res.extra).tag == (0x02, 0x03)
-    @test last(res.extra).data == 0x00000000:0x00000000
+    @test last(res.extra).data === nothing # empty field
     @test String(complex_test_case[res.filename]) == "filename.fna"
     @test String(complex_test_case[res.comment]) == "αβ学中文"
     @test String(copy(outdata)) == "Abracadabra"

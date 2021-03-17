@@ -1,8 +1,32 @@
-# Returns index of next zero or Nothing if no zero is found
-function unsafe_next_zero(p::Ptr{UInt8}, len::UInt, i::UInt32)::Union{Nothing, UInt32}
-    mem = SizedMemory(p + i - 1, len)
-    n = memchr(mem, 0x00)
-    n === nothing ? nothing : n % UInt32 + i - one(UInt32)
+
+# Returns index of next zero (or error if none is found)
+# pointer must point to first byte where the search begins
+# This can be SIMD'd but it's way fast anyway.
+function next_zero(p::Ptr{UInt8}, i::UInt32, lastindex::UInt32)::UInt32
+    while i ≤ lastindex
+        unsafe_load(p) === 0x00 && return i
+        i += UInt32(1)
+        p += 1
+    end
+    gzip_error(2)
+end
+
+struct SizedMemory
+    ptr::Ptr{UInt8}
+    len::UInt
+end
+
+SizedMemory(x) = SizedMemory(pointer(x), sizeof(x))
+Base.length(x::SizedMemory) = x.len
+Base.pointer(x::SizedMemory) = x.ptr
+
+function any_zeros(mem::SizedMemory)
+    i = UInt(1)
+    while i ≤ length(mem)
+        unsafe_load(pointer(mem), i % Int) === 0x00 && return true
+        i += UInt(1)
+    end
+    return false
 end
 
 # +---+---+---+---+==================================+
@@ -17,7 +41,7 @@ Data structure for gzip extra data. Fields:
 """
 struct GzipExtraField
     tag::Tuple{UInt8, UInt8} # (SI1, SI2)
-    data::UnitRange{UInt32}
+    data::Union{Nothing, UnitRange{UInt32}}
 end
 
 # The pointer points to the first byte of the first field
@@ -29,8 +53,8 @@ function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
         
         # We zero the range field on an empty subfield, so we take
         # that possibility into account
-        field_len = ifelse(iszero(first(field.data)), zero(UInt32), last(field.data) - first(field.data) + UInt32(1))
-        total_len = field_len % UInt16 + UInt16(4)
+        field_len = field.data === nothing ? UInt16(0) : length(field.data) % UInt16
+        total_len = field_len + UInt16(4)
         remaining_bytes -= total_len
         ptr += total_len
         index += total_len
@@ -47,9 +71,9 @@ function parse_extra_field(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt
     field_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + 2)))
     field_len + 4 > remaining_bytes && gzip_error(7)
     
-    # If the field is empty, we zero out the range and return that
+    # If the field is empty, we use a Nothing to convey that
     range = if iszero(field_len)
-        UInt32(0):UInt32(0)
+        nothing
     else
         index+UInt32(4):index+UInt32(4)-UInt32(1)+field_len
     end
@@ -189,8 +213,8 @@ function unsafe_gzip_decompress!(
         # +=========================================+
         # |...original file name, zero-terminated...| (more-->)
         # +=========================================+
-        zero_pos = unsafe_next_zero(ptr + 1, len, index)
-        (zero_pos === nothing || zero_pos > (len - 10)) && gzip_error(2)
+        zero_pos = next_zero(ptr + index, index, len % UInt32)
+        zero_pos > (len - 10) && gzip_error(2)
         filename = index:zero_pos - one(UInt32)
         index = zero_pos + one(UInt32)
     end
@@ -198,8 +222,8 @@ function unsafe_gzip_decompress!(
     # Skip comment
     comment = UInt32(0):UInt32(0)
     if FLAG_COMMENT
-        zero_pos = unsafe_next_zero(ptr + 1, len, index)
-        (zero_pos === nothing || zero_pos > (len - 10)) && gzip_error(2)
+        zero_pos = next_zero(ptr + index, index, len % UInt32)
+        zero_pos > (len - 10) && gzip_error(2)
         comment = index:zero_pos - one(UInt32)
         index = zero_pos + one(UInt32)
     end
@@ -320,9 +344,9 @@ end
         compressor::Compressor,
         out_ptr::Ptr{UInt8}, out_len::UInt,
         in_ptr::Ptr{UInt8}, in_len::UInt,
-        comment::Union{ScanByte.SizedMemory, Nothing},
-        filename::Union{ScanByte.SizedMemory, Nothing},
-        extra::Union{ScanByte.SizedMemory, Nothing},
+        comment::Union{SizedMemory, Nothing},
+        filename::Union{SizedMemory, Nothing},
+        extra::Union{SizedMemory, Nothing},
         header_crc::Bool
     )::Int
 
@@ -368,12 +392,12 @@ function unsafe_gzip_compress!(
     header = 0x00088b1f
     if comment !== nothing
         # Check for absence of zero byte
-        memchr(comment, 0x00) === nothing || gzip_error(2)
+        any_zeros(comment) && gzip_error(2)
         header |= 0x10000000
     end
     if filename !== nothing
         # Check for absence of zero byte
-        memchr(filename, 0x00) === nothing || gzip_error(2)
+        any_zeros(filename) && gzip_error(2)
         header |= 0x08000000
     end
     if extra !== nothing

@@ -4,16 +4,14 @@ authors = ["Jakob Nybo Nissen <jakobnybonissen@gmail.com>"]
 version = "0.2.0"
 
 [deps]
-ScanByte = "7b38b023-a4d7-4c5e-8d43-3f3097f304eb"
 libdeflate_jll = "46979653-d7f6-5232-b59e-dd310c4598de"
 
 [compat]
 julia = "1"
-ScanByte = "0.3"
 
 [extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test", "CodecZlib"]
