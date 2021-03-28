@@ -45,8 +45,13 @@ struct GzipExtraField
 end
 
 # The pointer points to the first byte of the first field
-function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
-    fields = GzipExtraField[]
+function parse_fields!(
+	fields::Vector{GzipExtraField},
+	ptr::Ptr{UInt8},
+	index::UInt32,
+remaining_bytes::UInt16
+)
+	empty!(fields)
     while !iszero(remaining_bytes)
         field = parse_extra_field(ptr, index, remaining_bytes)
         push!(fields, field)
@@ -60,6 +65,11 @@ function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
         index += total_len
     end
     return fields
+end
+
+# The pointer points to the first byte of the first field
+function parse_fields(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt16)
+	parse_fields!(GzipExtraField[], ptr, index, remaining_bytes)
 end
 
 # The pointer points to the first byte of the extra fields
