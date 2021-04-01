@@ -20,6 +20,7 @@ SizedMemory(x) = SizedMemory(pointer(x), sizeof(x))
 Base.length(x::SizedMemory) = x.len
 Base.pointer(x::SizedMemory) = x.ptr
 
+"Check if there are any 0x00 bytes in a block of memory"
 function any_zeros(mem::SizedMemory)
     i = UInt(1)
     while i ≤ length(mem)
@@ -37,7 +38,8 @@ end
 
 Data structure for gzip extra data. Fields:
 * `tag::NTuple{2, UInt8}` two-byte tag
-* `data::UnitRange{UInt32}` location of subfield data in original vector
+* `data::Union{Nothing, UnitRange{UInt32}}` location of subfield data in original vector,
+or `nothing` if empty.
 """
 struct GzipExtraField
     tag::Tuple{UInt8, UInt8} # (SI1, SI2)
@@ -90,6 +92,8 @@ function parse_extra_field(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt
     return GzipExtraField((s1, s2), range)
 end
 
+"Check if the block of memory beginning at `ptr` and `remaining_bytes` onwards
+contain valid extra data"
 function is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)
     while !iszero(remaining_bytes)
         # First four bytes: S1, S2, field_len
@@ -105,26 +109,95 @@ function is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)
 end
 
 """
-    GzipDecompressResult
+    GzipHeader
 
-Result of `LibDeflate`'s gzip decompression on byte vector. The fields `filename`
-and `comment` specify the location of gzip feature data in the input vector.
-When not applicable (e.g. the `comemnt` field is not applicable for gzip files 
-without the `FCOMMENT` flag), these fields are zeroed out.
-
-It has the following fields:
-* `len::UInt32` length of decompressed data
-* `mtime::UInt32` timestamp of original data, or zero
-* `filename::UnitRange{UInt32}` location of filename (or zero)
-* `comment::UnitRange{UInt32}` location of gzip comment (or zero)
-* `extra::Union{Nothing, Vector{GzipExtraField}}` gzip extra data (or `nothing`)
+Struct representing a gzip header. It has the following fields:
+* `mtime::UInt32`: Modification time of file
+* `filename::Union{Nothing, UnitRange{32}}` index of filename in header
+* `comment::Union{Nothing, UnitRange{32}}` index of comment in header
+* `extra::Union{Nothing, Vector{GzipExtraField}}` Extra gzip fields, if applicable.
 """
-struct GzipDecompressResult
-    len::UInt32
+struct GzipHeader
     mtime::UInt32
-    filename::UnitRange{UInt32}
-    comment::UnitRange{UInt32}
+    filename::Union{Nothing, UnitRange{UInt32}}
+    comment::Union{Nothing, UnitRange{UInt32}}
     extra::Union{Nothing, Vector{GzipExtraField}}
+end
+
+function unsafe_parse_gzip_header(
+    in_ptr::Ptr{UInt8},
+    max_len::UInt, # maximum length of header
+    extra_data::Union{GzipExtraField, Nothing}=nothing
+)
+    # header is at least 10 bytes
+    max_len > 9 || gzip_error(6)
+    # Bytes 1 - 10. Check first four bytes, skip rest
+    # +---+---+---+---+---+---+---+---+---+---+
+    # |ID1|ID2|CM |FLG|     MTIME     |XFL|OS | (more-->)
+    # +---+---+---+---+---+---+---+---+---+---+
+    ptr = in_ptr - UInt(1) # zero-indexed pointer
+    header = ltoh(unsafe_load(Ptr{UInt32}(ptr + 1)))
+    header & 0x00ffffff == 0x00088b1f || gzip_error(1)
+    FLAG_HCRC =    !iszero(header & 0x02000000)
+    FLAG_EXTRA =   !iszero(header & 0x04000000)
+    FLAG_NAME =    !iszero(header & 0x08000000)
+    FLAG_COMMENT = !iszero(header & 0x10000000)
+    mtime = ltoh(unsafe_load(Ptr{UInt32}(ptr + 5)))
+
+    # 32-bit index because this library only works with 32-bit buffers anyway
+    # (skip MTIME, XFL, OS), they're not useful anyway
+    index = UInt32(11)
+
+    extra = nothing
+    if FLAG_EXTRA
+        # +---+---+=================================+
+        # | XLEN  |...XLEN bytes of "extra field"...| (more-->)
+        # +---+---+=================================+
+        extra_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
+        extra_vector = if extra_data === nothing
+            GzipExtraField[]
+        else
+            extra_data
+        end
+        extra = parse_fields!(extra_vector, ptr + index + 2, index + UInt32(2), extra_len)
+        index += extra_len + UInt32(2)
+        index > max_len && gzip_error(2)
+    end
+
+    filename = nothing
+    if FLAG_NAME
+        # +=========================================+
+        # |...original file name, zero-terminated...| (more-->)
+        # +=========================================+
+        zero_pos = next_zero(ptr + index, index, max_len % UInt32)
+        zero_pos > max_len && gzip_error(2)
+        filename = index:zero_pos - one(UInt32)
+        index = zero_pos + one(UInt32)
+    end
+
+    # Skip comment
+    comment = nothing
+    if FLAG_COMMENT
+        zero_pos = next_zero(ptr + index, index, max_len % UInt32)
+        zero_pos > max_len && gzip_error(2)
+        comment = index:zero_pos - one(UInt32)
+        index = zero_pos + one(UInt32)
+    end
+
+    # Verify header CRC16, if present
+    if FLAG_HCRC
+        # Lower 16 bits of crc32 up to, not including, this index
+        # +---+---+
+        # | CRC16 |
+        # +---+---+
+        crc_obs_16 = unsafe_crc32(ptr + one(UInt), index - one(UInt)) % UInt16
+        crc_exp_16 = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
+        crc_obs_16 == crc_exp_16 || gzip_error(3)
+        index += UInt32(2)
+        index > max_len && gzip_error(2)
+    end
+
+    return (index - UInt32(1), GzipHeader(mtime, filename, comment, extra))
 end
 
 @noinline function gzip_error(code::Int)
@@ -149,6 +222,26 @@ end
 end
 
 """
+    GzipDecompressResult
+
+Result of `LibDeflate`'s gzip decompression on byte vector. The fields `filename`
+and `comment` specify the location of gzip feature data in the input vector.
+When not applicable (e.g. the `comemnt` field is not applicable for gzip files 
+without the `FCOMMENT` flag), these fields are zeroed out.
+
+It has the following fields:
+* `len::UInt32` length of decompressed data
+* `mtime::UInt32` timestamp of original data, or zero
+* `filename::UnitRange{UInt32}` location of filename (or zero)
+* `comment::UnitRange{UInt32}` location of gzip comment (or zero)
+* `extra::Union{Nothing, Vector{GzipExtraField}}` gzip extra data (or `nothing`)
+"""
+struct GzipDecompressResult
+    len::UInt32 # length of decompressed data
+    header::GzipHeader
+end
+
+"""
     gzip_decompress!(::Decompressor, out::Vector{UInt8}, in::Vector{UInt8},
         max_len=typemax(Int))
 
@@ -160,13 +253,14 @@ See also: [`unsafe_gzip_decompress!`](@ref)
 function gzip_decompress!(
     decompressor::Decompressor,
     out_data::Vector{UInt8},
-    in_data::Union{Vector{UInt8}, String, SubString{String}};
+    in_data::Union{Vector{UInt8}, String, SubString{String}},
+    extra_data::Union{GzipExtraField, Nothing}=nothing;
     max_len::Integer=typemax(Int),
 )
     GC.@preserve in_data out_data begin
         result = unsafe_gzip_decompress!(
             decompressor, out_data, UInt(max_len),
-            pointer(in_data), sizeof(in_data) % UInt
+            pointer(in_data), sizeof(in_data) % UInt, extra_data
         )
     end
 
@@ -176,11 +270,13 @@ end
 
 """
     unsafe_gzip_decompress!(decompressor::Decompressor, outdata::Vector{UInt8},
-        max_outlen::UInt, in_ptr::Ptr{UInt8}, len::UInt)
+        max_outlen::UInt, in_ptr::Ptr{UInt8}, len::UInt,
+        extra_data::Union{GzipExtraField, Nothing})
 
 Use the `Decompressor` to decompress gzip data at `in_ptr` and `len` bytes forward
 into `outdata`. If there is not enough room at `outdata`, resize `outdata`, except
-if it would be biffer than `max_outlen`, in that case throw an error.
+if it would be bigger than `max_outlen`, in that case throw an error.
+If `extra_data` is not `nothing`, reuse the passed vector
 
 Return a `GzipDecompressResult`
 
@@ -191,92 +287,36 @@ function unsafe_gzip_decompress!(
     out_data::Vector{UInt8}, 
     max_outlen::UInt,
     in_ptr::Ptr{UInt8},
-    len::UInt
+    len::UInt,
+    extra_data::Union{GzipExtraField, Nothing}=nothing
 )
-    # 10 byte header + 2 byte compression + 8 byte tail
-    len > 18 || gzip_error(6)
-    # Bytes 1 - 10. Check first four bytes, skip rest
-    # +---+---+---+---+---+---+---+---+---+---+
-    # |ID1|ID2|CM |FLG|     MTIME     |XFL|OS | (more-->)
-    # +---+---+---+---+---+---+---+---+---+---+
-    ptr = in_ptr - UInt(1) # zero-indexed pointer
-    header = ltoh(unsafe_load(Ptr{UInt32}(ptr + 1)))
-    header & 0x00ffffff == 0x00088b1f || gzip_error(1)
-    FLAG_HCRC =    !iszero(header & 0x02000000)
-    FLAG_EXTRA =   !iszero(header & 0x04000000)
-    FLAG_NAME =    !iszero(header & 0x08000000)
-    FLAG_COMMENT = !iszero(header & 0x10000000)
-    mtime = ltoh(unsafe_load(Ptr{UInt32}(ptr + 5)))
+    # We need to have at least 2 + 4 + 4 bytes left after header
+    nonheader_min_len = 2 + 4 + 4
 
-    # 32-bit index because this library only works with 32-bit buffers anyway
-    # (skip MTIME, XFL, OS), they're not useful anyway
-    index = UInt32(11)
+    # First decompress header
+    header_len, header = unsafe_parse_gzip_header(in_ptr, len - nonheader_min_len, extra_data)
 
-    extra = nothing
-    if FLAG_EXTRA
-        # +---+---+=================================+
-        # | XLEN  |...XLEN bytes of "extra field"...| (more-->)
-        # +---+---+=================================+
-        extra_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
-        extra = parse_fields(ptr + index + 2, index + UInt32(2), extra_len)
-        index += extra_len + UInt32(2)
-        index > (len - 9) && gzip_error(2)
-    end
-
-    filename = UInt32(0):UInt32(0)
-    if FLAG_NAME
-        # +=========================================+
-        # |...original file name, zero-terminated...| (more-->)
-        # +=========================================+
-        zero_pos = next_zero(ptr + index, index, len % UInt32)
-        zero_pos > (len - 10) && gzip_error(2)
-        filename = index:zero_pos - one(UInt32)
-        index = zero_pos + one(UInt32)
-    end
-
-    # Skip comment
-    comment = UInt32(0):UInt32(0)
-    if FLAG_COMMENT
-        zero_pos = next_zero(ptr + index, index, len % UInt32)
-        zero_pos > (len - 10) && gzip_error(2)
-        comment = index:zero_pos - one(UInt32)
-        index = zero_pos + one(UInt32)
-    end
-
-    # Verify header CRC16, if present
-    if FLAG_HCRC
-        # Lower 16 bits of crc32 up to, not including, this index
-        # +---+---+
-        # | CRC16 |
-        # +---+---+
-        crc_obs_16 = unsafe_crc32(ptr + one(UInt), index - one(UInt)) % UInt16
-        crc_exp_16 = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
-        crc_obs_16 == crc_exp_16 || gzip_error(3)
-        index += UInt32(2)
-        index > (len - 9) && gzip_error(2)
-    end
-
-    compressed_len = len - UInt(8) - index + one(UInt)
-
+    
     # Skip to end to check crc32 and data len
     # +---+---+---+---+---+---+---+---+
     # |     CRC32     |     ISIZE     | END OF FILE
     # +---+---+---+---+---+---+---+---+
-
-    uncompressed_size = ltoh(unsafe_load(Ptr{UInt32}(ptr + len - UInt(3))))
+    
+    compressed_len = len - UInt(8) - header_len
+    uncompressed_size = ltoh(unsafe_load(Ptr{UInt32}(in_ptr + len - UInt(4))))
     uncompressed_size > max_outlen && gzip_error(5)
     length(out_data) < uncompressed_size && resize!(out_data, uncompressed_size)
 
     # Now DEFLATE decompress
     unsafe_decompress!(Base.HasLength(), decompressor, pointer(out_data), uncompressed_size,
-    ptr + index, compressed_len)
+    in_ptr + header_len, compressed_len)
 
-    # Check for CRC
-    crc_exp = ltoh(unsafe_load(Ptr{UInt32}(ptr + len - UInt(7))))
+    # Check for CRC checksum and validate it
+    crc_exp = ltoh(unsafe_load(Ptr{UInt32}(in_ptr + len - UInt(8))))
     crc_obs = unsafe_crc32(pointer(out_data), uncompressed_size % Int)
     crc_exp == crc_obs || gzip_error(4)
 
-    GzipDecompressResult(uncompressed_size, mtime, filename, comment, extra)
+    GzipDecompressResult(uncompressed_size, header)
 end
 
 "Computes maximal output length of a gzip compression"

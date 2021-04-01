@@ -123,14 +123,14 @@ complex_test_case = UInt8[
     # Hard test case
     res = gzip_decompress!(decompressor, outdata, complex_test_case)
     @test res.len == 11
-    @test res.mtime == 0x60512cb3
-    @test length(res.extra) == 2
-    @test first(res.extra).tag == (0x42, 0x43)
-    @test first(res.extra).data == 0x00000011:0x00000012
-    @test last(res.extra).tag == (0x02, 0x03)
-    @test last(res.extra).data === nothing # empty field
-    @test String(complex_test_case[res.filename]) == "filename.fna"
-    @test String(complex_test_case[res.comment]) == "αβ学中文"
+    @test res.header.mtime == 0x60512cb3
+    @test length(res.header.extra) == 2
+    @test first(res.header.extra).tag == (0x42, 0x43)
+    @test first(res.header.extra).data == 0x00000011:0x00000012
+    @test last(res.header.extra).tag == (0x02, 0x03)
+    @test last(res.header.extra).data === nothing # empty field
+    @test String(complex_test_case[res.header.filename]) == "filename.fna"
+    @test String(complex_test_case[res.header.comment]) == "αβ学中文"
     @test String(copy(outdata)) == "Abracadabra"
 
 end
