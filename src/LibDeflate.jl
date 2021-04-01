@@ -231,6 +231,7 @@ include("gzip.jl")
 
 export Decompressor,
        Compressor,
+
        LibDeflateError,
        unsafe_decompress!,
        decompress!,
@@ -242,6 +243,8 @@ export Decompressor,
        gzip_compress!,
        unsafe_crc32,
        crc32,
+
+       unsafe_parse_gzip_header,
        is_valid_extra_data
 
 end # module

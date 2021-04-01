@@ -38,6 +38,44 @@ end
     end
 end
 
+header_data = UInt8[
+    # header
+    0x1f, 0x8b, 0x08, 0x1e, 0xb3, 0x2c, 0x51, 0x60, 0xff, 0x00,
+
+    # Extra data
+    0x0a, 0x00, 0x42, 0x43, 0x02, 0x00, 0xa1, 0x4c,
+    0x02, 0x03, 0x00, 0x00,
+
+    # Filename: "filename.fna"
+    0x66, 0x69, 0x6c, 0x65, 0x6e, 0x61, 0x6d, 0x65, 0x2e, 0x66, 0x6e, 0x61, 0x00,
+
+    # Complicated unicode comment "αβ学中文"
+    0xce, 0xb1, 0xce, 0xb2, 0xe5, 0xad, 0xa6, 0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87, 0x00,
+
+    # CRC16
+    0x78, 0x18
+]
+
+function test_header_example(data::Vector{UInt8}, header::LibDeflate.GzipHeader)
+    @test header.mtime == 0x60512cb3
+    @test length(header.extra) == 2
+    @test first(header.extra).tag == (0x42, 0x43)
+    @test first(header.extra).data == 0x00000011:0x00000012
+    @test last(header.extra).tag == (0x02, 0x03)
+    @test last(header.extra).data === nothing # empty field
+    @test String(data[header.filename]) == "filename.fna"
+    @test String(data[header.comment]) == "αβ学中文"
+    true
+end
+
+@testset "Parse header" begin
+
+    header = unsafe_parse_gzip_header(pointer(header_data), UInt(100))[2]
+    test_header_example(header_data, header)
+    header = unsafe_parse_gzip_header(pointer(header_data), UInt(100), LibDeflate.GzipExtraField[])[2]
+    test_header_example(header_data, header)
+end
+
 test_data = [
     "",
     "Abracadabra!",
@@ -74,23 +112,7 @@ test_filename = "testfile.foo"
 end
 
 
-complex_test_case = UInt8[
-    # header
-    0x1f, 0x8b, 0x08, 0x1e, 0xb3, 0x2c, 0x51, 0x60, 0xff, 0x00,
-
-    # Extra data
-    0x0a, 0x00, 0x42, 0x43, 0x02, 0x00, 0xa1, 0x4c,
-    0x02, 0x03, 0x00, 0x00,
-
-    # Filename: "filename.fna"
-    0x66, 0x69, 0x6c, 0x65, 0x6e, 0x61, 0x6d, 0x65, 0x2e, 0x66, 0x6e, 0x61, 0x00,
-
-    # Complicated unicode comment "αβ学中文"
-    0xce, 0xb1, 0xce, 0xb2, 0xe5, 0xad, 0xa6, 0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87, 0x00,
-
-    # CRC16
-    0x78, 0x18,
-    
+complex_test_case = vcat(header_data, UInt8[
     # Data: compressed "Abracadabra"
     0x01, 0x0b, 0x00, 0xf4, 0xff, 0x41, 0x62, 0x72, 0x61, 0x63, 0x61, 0x64, 0x61, 0x62, 0x72, 0x61,
     
@@ -99,7 +121,7 @@ complex_test_case = UInt8[
     
     # isize
     0x0b, 0x00, 0x00, 0x00
-]
+])
 
 @testset "Decompression" begin
     decompressor = Decompressor()
@@ -122,15 +144,6 @@ complex_test_case = UInt8[
 
     # Hard test case
     res = gzip_decompress!(decompressor, outdata, complex_test_case)
+    test_header_example(complex_test_case, res.header)
     @test res.len == 11
-    @test res.header.mtime == 0x60512cb3
-    @test length(res.header.extra) == 2
-    @test first(res.header.extra).tag == (0x42, 0x43)
-    @test first(res.header.extra).data == 0x00000011:0x00000012
-    @test last(res.header.extra).tag == (0x02, 0x03)
-    @test last(res.header.extra).data === nothing # empty field
-    @test String(complex_test_case[res.header.filename]) == "filename.fna"
-    @test String(complex_test_case[res.header.comment]) == "αβ学中文"
-    @test String(copy(outdata)) == "Abracadabra"
-
 end

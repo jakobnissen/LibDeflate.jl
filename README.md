@@ -6,25 +6,30 @@ Libdeflate is a heavily optimized implementation of the DEFLATE compression algo
 
 This package provides simple functionality for working with raw DEFLATE payloads and gzip data. It is intended for internal use by other packages, not to be used directly by users. Hence, its interface is somewhat small.
 
-For more details on the API, read the docstrings for the relevant functions.
+### Interface
+Several functions have a "safe" and an "unsafe" variant. The unsafe works with pointers, the safe with arrays. Unless the API is significantly different, these are grouped together here.
 
-### Exported types
+For more details on these functions, read their docstrings.
+
+__Common exported types__
 * `Decompressor`: Create an object that decompresses using DEFLATE.
 * `Compressor(N)`: Create an object that compresses using DEFLATE level `N`.
 * `LibDeflateError(::String)`: An `Exception` type for this package.
 
-### Exported functions
-* `unsafe_decompress!`: DEFLATE decompress data from one pointer to another
-* `decompress!`: DEFLATE decompress a byte vector into another byte vector
-* `unsafe_gzip_decompress!`: Gzip decompress data from a pointer to another, yielding a `GzipDecompressResult`.
-* `gzip_decompress!`: Same as `unsafe_gzip_decompress!`, but works on vectors, resizing output to fit.
-* `unsafe_compress`: DEFLATE compress data from one pointer to another
-* `compress!`: DEFLATE compress a byte vector into another byte vector
-* `unsafe_gzip_compress!`: Compress data from a pointer in gzip format.
-* `gzip_compress!`: Same as `unsafe_gzip_compress!`, but works on vectors.
-* `unsafe_crc32`: Compute the crc32 checksum of data obtained from a pointer.
-* `crc32`: Compute the crc32 checksum of the byte vector `data`.
-* `is_valid_extra_data`: Checks if data at pointer is valid gzip "extra fields".
+__Working with DEFLATE payloads__
+* `(unsafe_)decompress!`: DEFLATE decompress payload.
+* `(unsafe_)compress!`: DEFLATE compress payload
+
+__Working with gzip files__
+* `(unsafe_)gzip_decompress!`: Decompress gzip data.`
+* `(unsafe_)gzip_compress!`: Compress gzip data and/or metadata`
+
+* `(unsafe_)parse_gzip_header`: Parse out gzip header
+* `is_valid_extra_data`: Check if some bytes are valid metadata for the gzip "extra" field.
+
+
+__Miscellaneous__
+* `(unsafe)_crc32`: Compute the crc32 checksum of the byte vector `data`. Note that this is _not_ the same algorithm as `crc32c`.
 
 ## Example usage
 ```julia

@@ -37,6 +37,7 @@ end
     GzipExtraField
 
 Data structure for gzip extra data. Fields:
+
 * `tag::NTuple{2, UInt8}` two-byte tag
 * `data::Union{Nothing, UnitRange{UInt32}}` location of subfield data in original vector,
 or `nothing` if empty.
@@ -92,8 +93,12 @@ function parse_extra_field(ptr::Ptr{UInt8}, index::UInt32, remaining_bytes::UInt
     return GzipExtraField((s1, s2), range)
 end
 
-"Check if the block of memory beginning at `ptr` and `remaining_bytes` onwards
-contain valid extra data"
+"""
+    is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)
+
+Check if the chunk of bytes pointed to by `ptr` and `remaining_bytes`
+onward represent valid gzip metadata for the "extra" field.
+"""
 function is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)
     while !iszero(remaining_bytes)
         # First four bytes: S1, S2, field_len
@@ -124,10 +129,33 @@ struct GzipHeader
     extra::Union{Nothing, Vector{GzipExtraField}}
 end
 
+"""
+    parse_gzip_header
+
+See `unsafe_parse_gzip_header`
+"""
+function parse_gzip_header(
+    in::Vector{UInt8},
+    max_len::UInt,
+    extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
+)
+    return unsafe_parse_gzip_header(pointer(in), max_len, extra_data)
+end
+
+"""
+    unsafe_parse_gzip_header(
+        in_ptr::Ptr{UInt8}, max_len::UInt,
+        extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
+    )
+
+Parse the input data, returning a `GzipHeader` object, or erroring.
+The parser will not read more than `max_len` bytes. If a vector of gzip
+extra data is passed, it will not allocate a new vector, but overwrite the given one.
+"""
 function unsafe_parse_gzip_header(
     in_ptr::Ptr{UInt8},
     max_len::UInt, # maximum length of header
-    extra_data::Union{GzipExtraField, Nothing}=nothing
+    extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
 )
     # header is at least 10 bytes
     max_len > 9 || gzip_error(6)
@@ -254,7 +282,7 @@ function gzip_decompress!(
     decompressor::Decompressor,
     out_data::Vector{UInt8},
     in_data::Union{Vector{UInt8}, String, SubString{String}},
-    extra_data::Union{GzipExtraField, Nothing}=nothing;
+    extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing;
     max_len::Integer=typemax(Int),
 )
     GC.@preserve in_data out_data begin
@@ -288,7 +316,7 @@ function unsafe_gzip_decompress!(
     max_outlen::UInt,
     in_ptr::Ptr{UInt8},
     len::UInt,
-    extra_data::Union{GzipExtraField, Nothing}=nothing
+    extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
 )
     # We need to have at least 2 + 4 + 4 bytes left after header
     nonheader_min_len = 2 + 4 + 4
