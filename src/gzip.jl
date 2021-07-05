@@ -1,3 +1,23 @@
+@noinline function gzip_error(code::Int)
+    message = if code == 1
+        "Bad header"
+    elseif code == 2
+        "Unterminated null string"
+    elseif code == 3
+        "Header CRC16 checksum does not match"
+    elseif code == 4
+        "Payload CRC132 checksum does not match"
+    elseif code == 5
+        "Output data too long"
+    elseif code == 6
+        "Input data too short"
+    elseif code == 7
+        "Extra data too long"
+    elseif code == 8
+        "Extra data invalid"
+    end
+    throw(LibDeflateError(message))
+end
 
 # Returns index of next zero (or error if none is found)
 # pointer must point to first byte where the search begins
@@ -228,27 +248,6 @@ function unsafe_parse_gzip_header(
     return (index - UInt32(1), GzipHeader(mtime, filename, comment, extra))
 end
 
-@noinline function gzip_error(code::Int)
-    message = if code == 1
-        "Bad header"
-    elseif code == 2
-        "Unterminated null string"
-    elseif code == 3
-        "Header CRC16 checksum does not match"
-    elseif code == 4
-        "Payload CRC132 checksum does not match"
-    elseif code == 5
-        "Output data too long"
-    elseif code == 6
-        "Input data too short"
-    elseif code == 7
-        "Extra data too long"
-    elseif code == 8
-        "Extra data invalid"
-    end
-    throw(LibDeflateError(message))
-end
-
 """
     GzipDecompressResult
 
@@ -259,10 +258,7 @@ without the `FCOMMENT` flag), these fields are zeroed out.
 
 It has the following fields:
 * `len::UInt32` length of decompressed data
-* `mtime::UInt32` timestamp of original data, or zero
-* `filename::UnitRange{UInt32}` location of filename (or zero)
-* `comment::UnitRange{UInt32}` location of gzip comment (or zero)
-* `extra::Union{Nothing, Vector{GzipExtraField}}` gzip extra data (or `nothing`)
+* `header::GzipHeader` metadata
 """
 struct GzipDecompressResult
     len::UInt32 # length of decompressed data
