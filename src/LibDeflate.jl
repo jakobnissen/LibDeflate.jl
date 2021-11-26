@@ -104,7 +104,7 @@ function Compressor(compresslevel::Integer=DEFAULT_COMPRESSION_LEVEL)
     ptr = ccall(
         (:libdeflate_alloc_compressor, libdeflate),
         Ptr{Nothing},
-        (UInt,),
+        (Csize_t,),
         compresslevel
     )
     compressor = Compressor(compresslevel, ptr)
@@ -130,8 +130,8 @@ function _unsafe_decompress!(
 )::Union{LibDeflateError, Nothing}
     status = ccall(
         (:libdeflate_deflate_decompress, libdeflate),
-        UInt,
-        (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt, Ptr{UInt}),
+        Csize_t,
+        (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t, Ptr{UInt}),
         decompressor, in_ptr, inlen, out_ptr, out_len, nptr
     )
     if status == Cint(1)
@@ -255,8 +255,8 @@ function unsafe_compress!(
 )::Union{LibDeflateError, Int}
     bytes = ccall(
         (:libdeflate_deflate_compress, libdeflate),
-        UInt,
-        (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt),
+        Csize_t,
+        (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t),
         compressor, in_ptr, n_in, out_ptr, n_out
     )
     iszero(bytes) && return LibDeflateErrors.deflate_insufficient_space
@@ -298,7 +298,7 @@ See also: [`crc32`](@ref)
 function unsafe_crc32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(0))
     return ccall(
         (:libdeflate_crc32, libdeflate),
-        UInt32, (UInt32, Ptr{UInt8}, UInt),
+        UInt32, (UInt32, Ptr{UInt8}, Csize_t),
         start, in_ptr, n_in
     )
 end
@@ -327,7 +327,7 @@ See also: [`adler32`](@ref)
 function unsafe_adler32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(1))
     return ccall(
         (:libdeflate_adler32, libdeflate),
-        UInt32, (UInt32, Ptr{UInt8}, UInt),
+        UInt32, (UInt32, Ptr{UInt8}, Csize_t),
         start, in_ptr, n_in
     )
 end
