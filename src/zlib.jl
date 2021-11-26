@@ -1,8 +1,8 @@
 # Single-line boxes show the number of bytes, double-lined have
 # a variable number of bytes. E.g. here: 1, 1, 4, N, 4.
-# +---+---+---+---+---+---+===============+---+---+---+---+
-# |CMF|FLG|    DICTID     |COMPRESSED DATA|     ADLER32   |    
-# +---+---+---+---+---+---+===============+---+---+---+---+
+# +---+---+===============+---+---+---+---+
+# |CMF|FLG|COMPRESSED DATA|     ADLER32   |    
+# +---+---+===============+---+---+---+---+
 
 """
     zlib_decompress!(::Decompressor, out_data, in_data, [n_out::Integer]) -> Int

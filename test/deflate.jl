@@ -26,7 +26,7 @@ end
     @test compress!(c, zeros(UInt8, 16), v) == LibDeflateErrors.deflate_insufficient_space
 
     # Not compressed data
-    @test decompress!(d, zeros(UInt8, 512), rand(UInt8, 32)) == LibDeflateErrors.deflate_bad_data
+    @test decompress!(d, zeros(UInt8, 512), rand(UInt8, 32)) == LibDeflateErrors.deflate_bad_payload
 
     # Decompressed data too short
     v = zeros(UInt8, 256)
@@ -36,7 +36,7 @@ end
 
     # Decompressed data too long
     @test decompress!(d, zeros(UInt8, 32), compressed) == LibDeflateErrors.deflate_insufficient_space
-    @test decompress!(d, zeros(UInt8, 1024), compressed, 160) == LibDeflateErrors.deflate_input_too_short
+    @test decompress!(d, zeros(UInt8, 1024), compressed, 160) == LibDeflateErrors.deflate_output_too_short
 end
 
 @testset "Compression" begin

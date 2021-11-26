@@ -10,6 +10,7 @@ function next_zero(p::Ptr{UInt8}, i::UInt32, lastindex::UInt32)::Union{UInt32, L
     return LibDeflateErrors.gzip_string_not_null_terminated
 end
 
+# Convenience struct to avoid having to deal with so many pointers directly.
 struct SizedMemory
     ptr::Ptr{UInt8}
     len::UInt
@@ -51,7 +52,7 @@ function parse_fields!(
 	fields::Vector{GzipExtraField},
 	ptr::Ptr{UInt8},
 	index::UInt32,
-    remaining_bytes::UInt16
+    remaining_bytes::UInt16 # Format supports no more than 0xffff bytes here
 )::Union{Vector{GzipExtraField}, LibDeflateError}
 	empty!(fields)
     while !iszero(remaining_bytes)
@@ -104,15 +105,17 @@ end
 Check if the chunk of bytes pointed to by `ptr` and `remaining_bytes`
 onward represent valid gzip metadata for the "extra" field.
 """
-function is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)::Bool
-    while !iszero(remaining_bytes)
+function is_valid_extra_data(ptr::Ptr, remaining_bytes::Integer)::Bool
+    rem_bytes = UInt16(remaining_bytes)
+    while !iszero(rem_bytes)
         # First four bytes: S1, S2, field_len
-        remaining_bytes < 4 && return false
+        rem_bytes < 4 && return false
         # S2 must not be zero
-        iszero(unsafe_load(ptr + 1)) && return false
+        iszero(unsafe_load(Ptr{UInt8}(ptr) + 1)) && return false
         field_len = ltoh(unsafe_load(Ptr{UInt16}(ptr + 2)))
-        remaining_bytes < field_len + 4 && return false
-        remaining_bytes -= UInt16(4) + field_len
+        rem_bytes < field_len + 4 && return false
+        rem_bytes -= UInt16(4) + field_len
+        ptr += 4 + field_len
     end
     return true
 end
@@ -144,7 +147,7 @@ end
 
 """
     unsafe_parse_gzip_header(
-        in_ptr::Ptr{UInt8}, max_len::UInt,
+        in_ptr::Ptr, max_len::UInt,
         extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
     )
 
@@ -153,18 +156,19 @@ The parser will not read more than `max_len` bytes. If a vector of gzip
 extra data is passed, it will not allocate a new vector, but overwrite the given one.
 """
 function unsafe_parse_gzip_header(
-    in_ptr::Ptr{UInt8},
-    max_len::UInt, # maximum length of header
+    in_ptr::Ptr,
+    max_len::Integer, # maximum length of header
     extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
 )::Union{LibDeflateError, Tuple{UInt32, GzipHeader}}
 
     # header is at least 10 bytes
+    max_len = UInt(max_len)
     max_len > 9 || return LibDeflateErrors.gzip_header_too_short
     # Bytes 1 - 10. Check first four bytes, skip rest
     # +---+---+---+---+---+---+---+---+---+---+
     # |ID1|ID2|CM |FLG|     MTIME     |XFL|OS | (more-->)
     # +---+---+---+---+---+---+---+---+---+---+
-    ptr = in_ptr - UInt(1) # zero-indexed pointer
+    ptr = Ptr{UInt8}(in_ptr) - UInt(1) # zero-indexed pointer
     header = ltoh(unsafe_load(Ptr{UInt32}(ptr + 1)))
     header & 0x0000ffff == 0x00008b1f || return LibDeflateErrors.gzip_bad_magic_bytes
     header & 0x00ff0000 == 0x00080000 || return LibDeflateErrors.gzip_not_deflate
@@ -385,9 +389,9 @@ function gzip_compress!(
     compressor::Compressor,
     output::Vector{UInt8},
     input;
-    comment::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
-    filename::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
-    extra::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+    comment=nothing,
+    filename=nothing,
+    extra=nothing,
     header_crc::Bool=false
 )::Union{LibDeflateError, Vector{UInt8}}
     # Resize output to maximal possible length
@@ -452,9 +456,9 @@ function unsafe_gzip_compress!(
     out_len::Integer,
     in_ptr::Ptr,
     in_len::Integer,
-    comment::Union{SizedMemory, Nothing},
-    filename::Union{SizedMemory, Nothing},
-    extra::Union{SizedMemory, Nothing},
+    comment,
+    filename,
+    extra,
     header_crc::Bool,
 )::Union{LibDeflateError, Int}
     # Check output len is long enough
@@ -476,12 +480,12 @@ function unsafe_gzip_compress!(
     header = 0x00088b1f
     if comment !== nothing
         # Check for absence of zero byte
-        any_zeros(comment) && return LibDeflateErrors.gzip_null_in_string
+        any_zeros(SizedMemory(comment)) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x10000000
     end
     if filename !== nothing
         # Check for absence of zero byte
-        any_zeros(filename) && return LibDeflateErrors.gzip_null_in_string
+        any_zeros(SizedMemory(filename)) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x08000000
     end
     if extra !== nothing
