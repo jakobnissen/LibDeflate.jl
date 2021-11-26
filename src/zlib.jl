@@ -41,6 +41,7 @@ function zlib_decompress!(
     input,
     n_out::Integer
 )::Union{LibDeflateError, Int}
+    n_out > sizeof(output) && return LibDeflateErrors.deflate_insufficient_space
     GC.@preserve output input unsafe_zlib_decompress!(
         Base.HasLength(),
         decompressor,
@@ -125,12 +126,12 @@ Return the number of bytes written, or a `LibDeflateError`.
 See also: [`unsafe_zlib_compress!`](@ref)
 """
 function zlib_compress!(
-    decompressor::Decompressor,
+    compressor::Compressor,
     output::Array,
     input
 )::Union{LibDeflateError, Int}
     GC.@preserve output input unsafe_zlib_compress!(
-        decompressor,
+        compressor,
         pointer(output),
         sizeof(output),
         pointer(input),

@@ -233,9 +233,7 @@ function decompress!(
     in_data,
     n_out::Integer
 )::Union{LibDeflateError, Int}
-    if sizeof(out_data) < n_out
-        throw(ArgumentError("n_out must be less than or equal to byte size of out_data"))
-    end
+    sizeof(out_data) < n_out && return LibDeflateErrors.deflate_insufficient_space
     GC.@preserve out_data in_data unsafe_decompress!(
         Base.HasLength(),
         decompressor,

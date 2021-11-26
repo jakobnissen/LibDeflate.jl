@@ -9,3 +9,7 @@ end
 @testset "gzip" begin
     include("gzip.jl")
 end
+
+@testset "zlib" begin
+    include("zlib.jl")
+end
