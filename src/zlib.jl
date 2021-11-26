@@ -5,7 +5,7 @@
 # +---+---+---+---+---+---+===============+---+---+---+---+
 
 """
-    zlib_decompress!(decompressor, output::Array, input)
+    zlib_decompress!(::Decompressor, out_data, in_data, [n_out::Integer]) -> Int
 
 Zlib decompress from `input` to `output`. `input` must have `pointer(x)`
 and `sizeof(x)` implemented.
@@ -13,12 +13,15 @@ Return the number of bytes written, or a `LibDeflateError`.
 
 See also: [`unsafe_zlib_decompress!`](@ref)
 """
+function zlib_decompress! end
+
 function zlib_decompress!(
     decompressor::Decompressor,
     output::Array,
     input
 )::Union{LibDeflateError, Int}
     GC.@preserve output input unsafe_zlib_decompress!(
+        Base.SizeUnknown(),
         decompressor,
         pointer(output),
         sizeof(output),
@@ -27,18 +30,38 @@ function zlib_decompress!(
     )
 end
 
+function zlib_decompress!(
+    decompressor::Decompressor,
+    output::Array,
+    input,
+    n_out::Integer
+)::Union{LibDeflateError, Int}
+    GC.@preserve output input unsafe_zlib_decompress!(
+        Base.HasLength(),
+        decompressor,
+        pointer(output),
+        n_out,
+        pointer(input),
+        sizeof(input)
+    )
+end
+
 """
-    unsafe_zlib_decompress!(decompressor, out_ptr, max_outlen, in_ptr, len)
+    unsafe_zlib_decompress!(size, decompressor, out_ptr, n_out, in_ptr, len)
 
 Zlib decompress data beginning at `in_ptr` and `len` bytes onwards, into `out_ptr`.
 Return the number of bytes written, or a `LibDeflateError`.
+Size can be `SizeUnknown` or `HasLength`. If the former, `n_out` tells how much space
+is available at the output. If the latter, `n_out` is the exact number of bytes
+that the payload decompresses to.
 
 See also: [`zlib_decompress!`](@ref)
 """
 function unsafe_zlib_decompress!(
+    size::Union{Base.SizeUnknown, Base.HasLength},
     decompressor::Decompressor,
     out_ptr::Ptr,
-    max_outlen::Integer,
+    n_out::Integer,
     in_ptr::Ptr,
     len::Integer
 )::Union{LibDeflateError, Int}
@@ -53,20 +76,20 @@ function unsafe_zlib_decompress!(
 	header & 0x000f != 0x0008 && return LibDeflateErrors.zlib_not_deflate
 
 	# Next 4 bits must be 7, as the window size in libdeflate is hardcoded to 32 KiB.
-	header & 0x00f0 != 0x0070 && return LibDeflateErrors.zlib_wrong_window
+	header & 0x00f0 != 0x0070 && return LibDeflateErrors.zlib_wrong_window_size
 
 	# libdeflate does not support a custom decompression dict, I think
-	header & 0x2000 != 0x0000 && return LibDeflateErrors.zlib_has_dict
+	header & 0x2000 != 0x0000 && return LibDeflateErrors.zlib_needs_compression_dict
 
     # This is ntoh, because the header checksum is interpreted as a big-endian integer.
 	iszero(mod(ntoh(header), UInt16(31))) || return LibDeflateErrors.zlib_bad_header_check
 
     # Decompress payload
 	nbytes = unsafe_decompress!(
-		Base.SizeUnknown(),
+		size,
 		decompressor,
 		out_ptr,
-		max_outlen,
+		n_out,
 		ptr,
 		len - 6
 	)

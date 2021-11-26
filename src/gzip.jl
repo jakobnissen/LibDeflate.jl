@@ -7,7 +7,7 @@ function next_zero(p::Ptr{UInt8}, i::UInt32, lastindex::UInt32)::Union{UInt32, L
         i += UInt32(1)
         p += 1
     end
-    return LibDeflateErrors.gzip_no_null
+    return LibDeflateErrors.gzip_string_not_null_terminated
 end
 
 struct SizedMemory
@@ -51,7 +51,7 @@ function parse_fields!(
 	fields::Vector{GzipExtraField},
 	ptr::Ptr{UInt8},
 	index::UInt32,
-remaining_bytes::UInt16
+    remaining_bytes::UInt16
 )::Union{Vector{GzipExtraField}, LibDeflateError}
 	empty!(fields)
     while !iszero(remaining_bytes)
@@ -166,7 +166,8 @@ function unsafe_parse_gzip_header(
     # +---+---+---+---+---+---+---+---+---+---+
     ptr = in_ptr - UInt(1) # zero-indexed pointer
     header = ltoh(unsafe_load(Ptr{UInt32}(ptr + 1)))
-    header & 0x00ffffff == 0x00088b1f || return LibDeflateErrors.gzip_bad_header
+    header & 0x0000ffff == 0x00008b1f || return LibDeflateErrors.gzip_bad_magic_bytes
+    header & 0x00ff0000 == 0x00080000 || return LibDeflateErrors.gzip_not_deflate
     FLAG_HCRC =    !iszero(header & 0x02000000)
     FLAG_EXTRA =   !iszero(header & 0x04000000)
     FLAG_NAME =    !iszero(header & 0x08000000)
@@ -201,7 +202,7 @@ function unsafe_parse_gzip_header(
         # +=========================================+
         zero_pos = next_zero(ptr + index, index, max_len % UInt32)
         zero_pos isa LibDeflateError && return zero_pos
-        zero_pos > max_len && return LibDeflateErrors.gzip_no_null
+        zero_pos > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
         filename = index:zero_pos - one(UInt32)
         index = zero_pos + one(UInt32)
     end
@@ -211,7 +212,7 @@ function unsafe_parse_gzip_header(
     if FLAG_COMMENT
         zero_pos = next_zero(ptr + index, index, max_len % UInt32)
         zero_pos isa LibDeflateError && return zero_pos
-        zero_pos > max_len && return LibDeflateErrors.gzip_no_null
+        zero_pos > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
         comment = index:zero_pos - one(UInt32)
         index = zero_pos + one(UInt32)
     end
@@ -224,9 +225,9 @@ function unsafe_parse_gzip_header(
         # +---+---+
         crc_obs_16 = unsafe_crc32(ptr + one(UInt), index - one(UInt)) % UInt16
         crc_exp_16 = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
-        crc_obs_16 == crc_exp_16 || return LibDeflateErrors.gzip_bad_crc16
+        crc_obs_16 == crc_exp_16 || return LibDeflateErrors.gzip_bad_header_crc16
         index += UInt32(2)
-        index > max_len && return LibDeflateErrors.gzip_no_null
+        index > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
     end
 
     return (index - UInt32(1), GzipHeader(mtime, filename, comment, extra))
@@ -280,12 +281,12 @@ function gzip_decompress!(
 end
 
 """
-    unsafe_gzip_decompress!(decompressor::Decompressor, outdata::Vector{UInt8},
+    unsafe_gzip_decompress!(decompressor::Decompressor, out_data::Vector{UInt8},
         max_outlen::UInt, in_ptr::Ptr{UInt8}, len::UInt,
         extra_data::Union{GzipExtraField, Nothing})
 
 Use the `Decompressor` to decompress gzip data at `in_ptr` and `len` bytes forward
-into `outdata`. If there is not enough room at `outdata`, resize `outdata`, except
+into `out_data`. If there is not enough room at `out_data`, resize `out_data`, except
 if it would be bigger than `max_outlen`, in that case throw an error.
 If `extra_data` is not `nothing`, reuse the passed vector
 
@@ -340,7 +341,13 @@ function unsafe_gzip_decompress!(
 end
 
 "Computes maximal output length of a gzip compression"
-function max_out_len(input_len::UInt, comment_len::UInt, filename_len::UInt, extra_len::UInt16, header_crc::Bool)
+function max_out_len(
+    input_len::UInt,
+    comment_len::UInt,
+    filename_len::UInt,
+    extra_len::UInt16,
+    header_crc::Bool
+)
     # Taken from libdeflate source code
     # with slight modifications
     static = 10 + 8 + 9 # header + footer + padding
@@ -453,14 +460,14 @@ function unsafe_gzip_compress!(
     # Check output len is long enough
     max_out_len(
         in_len,
-        comment === nothing ? UInt(0) : length(comment),
-        filename === nothing ? UInt(0) : length(filename),
+        comment === nothing ? UInt(0) : sizeof(comment),
+        filename === nothing ? UInt(0) : sizeof(filename),
         if extra === nothing
             UInt16(0)
         else
             # No more than typemax(UInt16) bytes for extra field
-            length(extra) > typemax(UInt16) && return LibDeflateErrors.gzip_extra_too_long
-            length(extra) % UInt16
+            sizeof(extra) > typemax(UInt16) && return LibDeflateErrors.gzip_extra_too_long
+            sizeof(extra) % UInt16
         end,
         header_crc
     ) > out_len && return LibDeflateErrors.deflate_insufficient_space
@@ -469,17 +476,17 @@ function unsafe_gzip_compress!(
     header = 0x00088b1f
     if comment !== nothing
         # Check for absence of zero byte
-        any_zeros(comment) && return LibDeflateErrors.gzip_no_null
+        any_zeros(comment) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x10000000
     end
     if filename !== nothing
         # Check for absence of zero byte
-        any_zeros(filename) && return LibDeflateErrors.gzip_no_null
+        any_zeros(filename) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x08000000
     end
     if extra !== nothing
         # Validate extra data
-        is_valid_extra_data(pointer(extra), length(extra) % UInt16) || return LibDeflateErrors.gzip_bad_extra
+        is_valid_extra_data(pointer(extra), sizeof(extra) % UInt16) || return LibDeflateErrors.gzip_bad_extra
         header |= 0x04000000
     end
     header = ifelse(header_crc, header | 0x02000000, header)
@@ -496,22 +503,22 @@ function unsafe_gzip_compress!(
     
     # Add in extra data
     if extra !== nothing
-        unsafe_store!(Ptr{UInt16}(ptr + index), htol(length(extra) % UInt16))
-        unsafe_copyto!(ptr + index + 2, pointer(extra), length(extra))
-        index += UInt(2) + length(extra)
+        unsafe_store!(Ptr{UInt16}(ptr + index), htol(sizeof(extra) % UInt16))
+        unsafe_copyto!(ptr + index + 2, pointer(extra), sizeof(extra))
+        index += UInt(2) + sizeof(extra)
     end
 
     # Add in filename
     if filename !== nothing
-        unsafe_copyto!(ptr + index, pointer(filename), length(filename))
-        index += length(filename) + one(UInt) # null byte
+        unsafe_copyto!(ptr + index, pointer(filename), sizeof(filename))
+        index += sizeof(filename) + one(UInt) # null byte
         unsafe_store!(ptr + index - 1, 0x00)
     end
 
     # Add in comment
     if comment !== nothing
-        unsafe_copyto!(ptr + index, pointer(comment), length(comment))
-        index += length(comment) + one(UInt) # null byte
+        unsafe_copyto!(ptr + index, pointer(comment), sizeof(comment))
+        index += sizeof(comment) + one(UInt) # null byte
         unsafe_store!(ptr + index - 1, 0x00)
     end
 
@@ -523,8 +530,8 @@ function unsafe_gzip_compress!(
     end
 
     # Add in compressed data
-    remaining_outdata = out_len - index + 1 - 8 # tail
-    n_compressed = unsafe_compress!(compressor, ptr + index, remaining_outdata, in_ptr, in_len)
+    remaining_out_data = out_len - index + 1 - 8 # tail
+    n_compressed = unsafe_compress!(compressor, ptr + index, remaining_out_data, in_ptr, in_len)
     n_compressed isa LibDeflateError && return n_compressed
     index += n_compressed
 
