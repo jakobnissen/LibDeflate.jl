@@ -5,10 +5,15 @@
 # +---+---+===============+---+---+---+---+
 
 """
-    zlib_decompress!(::Decompressor, out_data, in_data, [n_out::Integer]) -> Int
+    zlib_decompress!(
+        ::Decompressor, output::Array, input, [n_out::Integer]
+    )::Union{LibDeflateError, Int}
 
 Zlib decompress from `input` to `output`. `input` must have `pointer(x)`
 and `sizeof(x)` implemented.
+If the precise number of decompressed bytes is known, pass it in as `n_out`
+for added performance. If it is wrong, the function will return an error.
+
 Return the number of bytes written, or a `LibDeflateError`.
 
 See also: [`unsafe_zlib_decompress!`](@ref)
@@ -47,13 +52,18 @@ function zlib_decompress!(
 end
 
 """
-    unsafe_zlib_decompress!(size, decompressor, out_ptr, n_out, in_ptr, len)
+    unsafe_zlib_decompress!(
+        size::Union{Base.SizeUnknown, Base.HasLength},
+        ::Decompressor,
+        out_ptr::Ptr, n_out::Integer,
+        in_ptr::Ptr, len::Integer
+    )::Union{LibDeflateError, Int}
 
 Zlib decompress data beginning at `in_ptr` and `len` bytes onwards, into `out_ptr`.
 Return the number of bytes written, or a `LibDeflateError`.
-Size can be `SizeUnknown` or `HasLength`. If the former, `n_out` tells how much space
+`size`` can be `SizeUnknown` or `HasLength`. If the former, `n_out` tells how much space
 is available at the output. If the latter, `n_out` is the exact number of bytes
-that the payload decompresses to.
+that the payload decompresses to. The latter is faster.
 
 See also: [`zlib_decompress!`](@ref)
 """
@@ -104,7 +114,9 @@ function unsafe_zlib_decompress!(
 end
 
 """
-    zlib_compress!(compressor, output::Array, input)
+    zlib_compress!(
+        ::Compressor, output::Array, input
+    )::Union{LibDeflateError, Int}
 
 Zlib compress from `input` to `output`. `input` must have `pointer(x)`
 and `sizeof(x)` implemented.
@@ -127,7 +139,11 @@ function zlib_compress!(
 end
 
 """
-    unsafe_zlib_compress!(compressor, out_ptr, max_outlen, in_ptr, len)
+    unsafe_zlib_compress!(
+        ::Compressor,
+        out_ptr::Ptr, max_outlen::Integer,
+        in_ptr::Ptr, len::Integer
+    )::Union{LibDeflateError, Int}
 
 Zlib compress data beginning at `in_ptr` and `len` bytes onwards, into `out_ptr`.
 Return the number of bytes written, or a `LibDeflateError`.

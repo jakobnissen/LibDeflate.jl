@@ -100,7 +100,7 @@ function parse_extra_field(
 end
 
 """
-    is_valid_extra_data(ptr::Ptr{UInt8}, remaining_bytes::UInt16)
+    is_valid_extra_data(ptr::Ptr, remaining_bytes::UInt16)::Bool
 
 Check if the chunk of bytes pointed to by `ptr` and `remaining_bytes`
 onward represent valid gzip metadata for the "extra" field.
@@ -147,11 +147,11 @@ end
 
 """
     unsafe_parse_gzip_header(
-        in_ptr::Ptr, max_len::UInt,
+        in_ptr::Ptr, max_len::Integer,
         extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
     )
 
-Parse the input data, returning a `GzipHeader` object, or erroring.
+Parse the input data, returning a `GzipHeader` object, or a `LibDeflateError`.
 The parser will not read more than `max_len` bytes. If a vector of gzip
 extra data is passed, it will not allocate a new vector, but overwrite the given one.
 """
@@ -240,10 +240,7 @@ end
 """
     GzipDecompressResult
 
-Result of `LibDeflate`'s gzip decompression on byte vector. The fields `filename`
-and `comment` specify the location of gzip feature data in the input vector.
-When not applicable (e.g. the `comemnt` field is not applicable for gzip files 
-without the `FCOMMENT` flag), these fields are zeroed out.
+Result of `LibDeflate`'s gzip decompression on byte vector.
 
 It has the following fields:
 * `len::UInt32` length of decompressed data
@@ -255,10 +252,12 @@ struct GzipDecompressResult
 end
 
 """
-    gzip_decompress!(::Decompressor, out::Vector{UInt8}, in, max_len=typemax(Int))
+    gzip_decompress!(
+        ::Decompressor, out::Vector{UInt8}, in_data, max_len=typemax(Int)
+    )::Union{GzipDecompressResult, LibDeflateError}
 
-Gzip decompress the input data into `out`, and resize `out` to fit. Throws an error
-if `out` would be resized to larger than `max_len`. Returns a `GzipDecompressResult`.
+Gzip decompress the input data into `out`, and resize `out` to fit.
+`in_data` must implement `sizeof` and `pointer`.
 
 See also: [`unsafe_gzip_decompress!`](@ref)
 """
@@ -285,14 +284,16 @@ function gzip_decompress!(
 end
 
 """
-    unsafe_gzip_decompress!(decompressor::Decompressor, out_data::Vector{UInt8},
-        max_outlen::UInt, in_ptr::Ptr{UInt8}, len::UInt,
-        extra_data::Union{GzipExtraField, Nothing})
+    unsafe_gzip_decompress!(
+        ::Decompressor, out_data::Vector{UInt8},
+        max_outlen::Integer, in_ptr::Ptr, len::Integer,
+        extra_data::Union{Vector{GzipExtraField}, Nothing}
+    )::Union{LibDeflateError, GzipDecompressResult}
 
 Use the `Decompressor` to decompress gzip data at `in_ptr` and `len` bytes forward
 into `out_data`. If there is not enough room at `out_data`, resize `out_data`, except
-if it would be bigger than `max_outlen`, in that case throw an error.
-If `extra_data` is not `nothing`, reuse the passed vector
+if it would be bigger than `max_outlen`, in that case return an error.
+If `extra_data` is not `nothing`, reuse the vector by overwriting.
 
 Return a `GzipDecompressResult`
 
@@ -344,7 +345,7 @@ function unsafe_gzip_decompress!(
     GzipDecompressResult(uncompressed_size, header)
 end
 
-"Computes maximal output length of a gzip compression"
+#Computes maximal output length of a gzip compression
 function max_out_len(
     input_len::UInt,
     comment_len::UInt,
@@ -369,19 +370,22 @@ end
     gzip_compress!(
         compressor::Compressor,
         output::Vector{UInt8},
-        input::Vector{UInt8},
-        comment::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
-        filename::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
-        extra::Union{String, SubString{String}, Vector{UInt8}, Nothing}=nothing,
+        input
+        comment=nothing,
+        filename=nothing,
+        extra=nothing,
         header_crc::Bool=false
-    )
+    )::Union{LibDeflateError, Vector{UInt8}}
 
 Gzip compress `input` into `output` and resizing output to fit. Returns `output`.
+`input` must implement `sizeof` and `pointer`.
 
-Adds optional data `comment`, `filename`, `extra` and `header_crc`:
+Adds optional data `comment`, `filename`, `extra`. All these must be `nothing` if
+not applicable, or else implement `sizeof` and `pointer`.
 * `comment` and `filename` must not include the byte `0x00`.
 * `extra` must be at most `typemax(UInt16)` bytes long.
-* `header_crc` is true, add the header CRC checksum.
+
+If `header_crc` is true, add the header CRC checksum.
 
 See also: [`unsafe_gzip_compress!`](@ref)
 """
@@ -430,21 +434,23 @@ end
 """
     unsafe_gzip_compress!(
         compressor::Compressor,
-        out_ptr::Ptr{UInt8}, out_len::UInt,
-        in_ptr::Ptr{UInt8}, in_len::UInt,
-        comment::Union{SizedMemory, Nothing},
-        filename::Union{SizedMemory, Nothing},
-        extra::Union{SizedMemory, Nothing},
+        out_ptr::Ptr, out_len::Integer,
+        in_ptr::Ptr, in_len::Integer,
+        comment,
+        filename,
+        extra:,
         header_crc::Bool
-    )::Int
+    )::Union{LibDeflateError, Int}
 
-Use the `Compressor` to gzip compress input `in_len` bytes from `in_ptr`, into `out_ptr`.
-If the resulting gzip data could be longer than `out_len`, throw an error.
-Optionally, include gzip comment, filename or extra data. These should be represented
-by a `SizedMemory` object, or `nothing` if it should be skipped.
+Use the `Compressor` to gzip compress input at `in_ptr` and `in_len` bytes onwards
+to, `out_ptr`.
+If the resulting gzip data could be longer than `out_len`, return an error.
+Optionally, include gzip comment, filename or extra data. All these must be `nothing` if
+not applicable, or else implement `sizeof` and `pointer`.
+
+Adds optional data `comment`, `filename`, `extra`. 
 * `comment` and `filename` must not include the byte `0x00`.
 * `extra` must be at most `typemax(UInt16)` bytes long.
-If `header_crc` is true, add the header CRC checksum.
 
 Returns the number of bytes written to `out_ptr`.
 
