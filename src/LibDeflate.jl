@@ -369,7 +369,7 @@ Calculate the adler32 checksum of the byte vector `data` and seed `start` (1 by 
 See also: [`unsafe_adler32`](@ref)
 """
 function adler32(data, start::UInt32=UInt32(1))
-    GC.@preserve data unsafe_crc32(pointer(data), sizeof(data), start)
+    GC.@preserve data unsafe_adler32(pointer(data), sizeof(data), start)
 end
 
 include("gzip.jl")
@@ -402,6 +402,7 @@ export Decompressor,
        adler32,
 
        unsafe_parse_gzip_header,
+       parse_gzip_header,
        is_valid_extra_data
 
 end # module

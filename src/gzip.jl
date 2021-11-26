@@ -137,9 +137,15 @@ struct GzipHeader
 end
 
 """
-    parse_gzip_header
+    parse_gzip_header(
+        input, extra_data::Union{Vector{GzipExtraField}, Nothing}
+    )::Union{LibDeflateError, Tuple{UInt32, GzipHeader}}
 
-See `unsafe_parse_gzip_header`
+Parse the input data, returning a `GzipHeader` object, or a `LibDeflateError`.
+The parser will not read more than `max_len` bytes.
+`input` must implement `sizeof` and `pointer`.
+If a vector of gzip
+extra data is passed, it will not allocate a new vector, but overwrite the given one.
 """
 function parse_gzip_header(in, extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing)
     return unsafe_parse_gzip_header(pointer(in), sizeof(in), extra_data)
@@ -231,7 +237,7 @@ function unsafe_parse_gzip_header(
         crc_exp_16 = ltoh(unsafe_load(Ptr{UInt16}(ptr + index)))
         crc_obs_16 == crc_exp_16 || return LibDeflateErrors.gzip_bad_header_crc16
         index += UInt32(2)
-        index > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
+        index > (max_len + 1) && return LibDeflateErrors.gzip_string_not_null_terminated
     end
 
     return (index - UInt32(1), GzipHeader(mtime, filename, comment, extra))

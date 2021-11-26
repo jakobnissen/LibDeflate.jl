@@ -58,4 +58,35 @@ end
     @test zlib_compress!(compressor, zeros(Float64, 4), "foo") == length(first(zlib_test_data))
     @test zlib_compress!(compressor, zeros(Int8, 0), "foo") == LibDeflateErrors.zlib_insufficient_space
     @test zlib_compress!(compressor, zeros(Float64, 1), "foo") == LibDeflateErrors.deflate_insufficient_space
+
+    for (compresslevel, header) in [(1, 0x0178), (4, 0x9c78), (LibDeflate.DEFAULT_COMPRESSION_LEVEL, 0x5e78), (12, 0xda78)]
+        compressor = Compressor(compresslevel)
+        @test zlib_compress!(compressor, output, "foo") > 6
+        @test UInt16(output[1]) | (UInt16(output[2]) << 8) == header
+    end
+end
+
+@testset "Adler32" begin
+    @test adler32("") == UInt32(1)
+    @test adler32("", 0x98765432) == 0x98765432
+    @test adler32("foo") == 0x02820145
+end
+
+@testset "Round trip" begin
+    compressed = zeros(UInt8, 128)
+    decompressed = zeros(UInt8, 128)
+    compressor = Compressor()
+    decompressor = Decompressor()
+    for input in ("Abracadabra", "", collect(codeunits("Power overwhelming")))
+        v = Vector{UInt8}(input)
+        n_compressed_bytes = zlib_compress!(compressor, compressed, input)
+        @test n_compressed_bytes > 6
+        @test zlib_decompress!(decompressor, decompressed, compressed[1:n_compressed_bytes], sizeof(input)) isa Int
+        @test transcode(ZlibDecompressor, compressed[1:n_compressed_bytes]) == v
+
+        # Can decompress zlib
+        zlib_compressed = transcode(ZlibCompressor, v)
+        @test zlib_decompress!(decompressor, decompressed, zlib_compressed) == sizeof(input)
+        @test decompressed[1:sizeof(input)] == v
+    end
 end

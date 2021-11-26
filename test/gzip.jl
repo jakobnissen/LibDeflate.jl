@@ -69,11 +69,20 @@ function test_header_example(data::Vector{UInt8}, header::LibDeflate.GzipHeader)
 end
 
 @testset "Parse header" begin
-    header = unsafe_parse_gzip_header(pointer(header_data), UInt(100))[2]
+    header = unsafe_parse_gzip_header(pointer(header_data), UInt(51))[2]
     test_header_example(header_data, header)
-    header = unsafe_parse_gzip_header(pointer(header_data), UInt(100), LibDeflate.GzipExtraField[])[2]
+
+    header = parse_gzip_header(header_data)[2]
     test_header_example(header_data, header)
+
+    header = unsafe_parse_gzip_header(pointer(header_data), UInt(51), LibDeflate.GzipExtraField[])[2]
+    test_header_example(header_data, header)
+
+    header_data[end-2] = 0x01
+    @test unsafe_parse_gzip_header(pointer(header_data), UInt(51)) == LibDeflateErrors.gzip_string_not_null_terminated
+    header_data[end-2] = 0x00
 end
+
 
 test_data = [
     "",
