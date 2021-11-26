@@ -4,25 +4,25 @@ using libdeflate_jll
 
 module LibDeflateErrors
 
-const ERRORS = [
-    (:deflate_bad_data, "DEFLATE: DEFLATE payload is incorrectly formatted"),
-    (:deflate_input_too_short, "DEFLATE: Input data too short"),
-    (:deflate_insufficient_space, "DEFLATE: Insufficient space at output"),
-    (:gzip_header_too_short, "Gzip: Header too short"),
-    (:gzip_bad_header, "Gzip: Bad header"),
-    (:gzip_no_null, "Gzip: Unterminated null string"),
-    (:gzip_bad_crc16, "Gzip: Header crc16 check sum does not match"),
-    (:gzip_bad_crc32, "Gzip: Payload crc32 check sum does not match"),
-    (:gzip_extra_too_long, "Gzip: Extra data fields too long"),
-    (:gzip_bad_extra, "Gzip: Extra data fields invalid"),
-
-]
-
-expr = :(@enum LibDeflateError::UInt8)
-for (sym, msg) in ERRORS
-    push!(expr.args, sym)
+@enum LibDeflateError::UInt8 begin
+    deflate_bad_payload
+    deflate_input_too_short
+    deflate_insufficient_space
+    gzip_header_too_short
+    gzip_bad_header
+    gzip_no_null
+    gzip_bad_crc16
+    gzip_bad_crc32
+    gzip_extra_too_long
+    gzip_bad_extra
+    zlib_input_too_short
+    zlib_not_deflate
+    zlib_wrong_window
+    zlib_has_dict
+    zlib_bad_header_check
+    zlib_bad_adler32
+    zlib_insufficient_space
 end
-eval(expr)
 
 @doc """
     LibDeflateError
@@ -33,11 +33,12 @@ Successful operations will never return a `LibDeflateError`
 """
 LibDeflateError
 
-Base.print(io::IO, x::LibDeflateError) = print(io, ERRORS[Integer(x)+1][2])
 export LibDeflateError
 end # module
 
 using .LibDeflateErrors
+
+const DEFAULT_COMPRESSION_LEVEL = 6
 
 # Must be mutable for the GC to be able to interact with it
 """
@@ -58,15 +59,24 @@ end
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Decompressor) = x.ptr
 
 function Decompressor()
-    decompressor = Decompressor(0, ccall((:libdeflate_alloc_decompressor, 
-                   libdeflate), Ptr{Nothing}, ()))
+    decompressor = Decompressor(0,
+        ccall(
+            (:libdeflate_alloc_decompressor, libdeflate),
+            Ptr{Nothing},
+            ()
+        )
+    )
     finalizer(free_decompressor, decompressor)
     return decompressor
 end
 
 function free_decompressor(decompressor::Decompressor)
-    ccall((:libdeflate_free_decompressor, libdeflate), 
-           Nothing, (Ptr{Nothing},), decompressor)
+    ccall(
+        (:libdeflate_free_decompressor, libdeflate), 
+        Nothing,
+        (Ptr{Nothing},),
+        decompressor
+    )
     return nothing
 end
 
@@ -87,10 +97,14 @@ end
 
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Compressor) = x.ptr
 
-function Compressor(compresslevel::Integer=6)
+function Compressor(compresslevel::Integer=DEFAULT_COMPRESSION_LEVEL)
     compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
-    ptr = ccall((:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing},
-                (UInt,), compresslevel)
+    ptr = ccall(
+        (:libdeflate_alloc_compressor, libdeflate),
+        Ptr{Nothing},
+        (UInt,),
+        compresslevel
+    )
     compressor = Compressor(compresslevel, ptr)
     finalizer(free_compressor, compressor)
     return compressor
@@ -106,9 +120,9 @@ end
 # Raw C call - do not export this
 function _unsafe_decompress!(
     decompressor::Decompressor,
-    outptr::Ptr{UInt8},
+    outptr::Ptr,
     outlen::Integer,
-    inptr::Ptr{UInt8},
+    inptr::Ptr,
     inlen::Integer,
     nptr::Ptr
 )::Union{LibDeflateError, Nothing}
@@ -119,7 +133,7 @@ function _unsafe_decompress!(
         decompressor, inptr, inlen, outptr, outlen, nptr
     )
     if status == Cint(1)
-        return LibDeflateErrors.deflate_bad_data
+        return LibDeflateErrors.deflate_bad_payload
     elseif status == Cint(2)
         return LibDeflateErrors.deflate_input_too_short
     elseif status == Cint(3)
@@ -149,9 +163,9 @@ function unsafe_decompress! end
 function unsafe_decompress!(
     ::Base.HasLength,
     decompressor::Decompressor,
-    outptr::Ptr{UInt8},
+    outptr::Ptr,
     n_out::Integer,
-    inptr::Ptr{UInt8},
+    inptr::Ptr,
     n_in::Integer
 )::Union{LibDeflateError, Int}
     y = _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, C_NULL)
@@ -161,9 +175,9 @@ end
 function unsafe_decompress!(
     ::Base.SizeUnknown,
     decompressor::Decompressor,
-    outptr::Ptr{UInt8},
+    outptr::Ptr,
     n_out::Integer,
-    inptr::Ptr{UInt8},
+    inptr::Ptr,
     n_in::Integer
 )::Union{LibDeflateError, Int}
     y = GC.@preserve decompressor begin
@@ -188,8 +202,8 @@ function decompress! end
 # Decompress method with length known (preferred)
 function decompress!(
     decompressor::Decompressor,
-    outdata::Vector{UInt8},
-    indata::Vector{UInt8},
+    outdata::Array,
+    indata,
     n_out::Integer
 )::Union{LibDeflateError, Int}
     if length(outdata) < n_out
@@ -201,23 +215,23 @@ function decompress!(
         pointer(outdata),
         n_out,
         pointer(indata),
-        length(indata)
+        sizeof(indata)
     )
 end
 
 # Decompress method with length unknown (not preferred)
 function decompress!(
     decompressor::Decompressor,
-    outdata::Vector{UInt8},
-    indata::Vector{UInt8}
+    outdata::Array,
+    indata
 )::Union{LibDeflateError, Int}
     GC.@preserve outdata indata unsafe_decompress!(
         Base.SizeUnknown(),
         decompressor,
         pointer(outdata),
-        length(outdata),
+        sizeof(outdata),
         pointer(indata),
-        length(indata)
+        sizeof(indata)
     )
 end
 
@@ -232,9 +246,9 @@ See also: [`compress!`](@ref)
 """
 function unsafe_compress!(
     compressor::Compressor,
-    outptr::Ptr{UInt8},
+    outptr::Ptr,
     n_out::Integer,
-    inptr::Ptr{UInt8},
+    inptr::Ptr,
     n_in::Integer
 )::Union{LibDeflateError, Int}
     bytes = ccall(
@@ -257,15 +271,15 @@ The output must fit in `outdata`. Return the number of bytes written to `outdata
 """
 function compress!(
     compressor::Compressor,
-    outdata::Vector{UInt8},
-    indata::Vector{UInt8}
+    outdata::Array,
+    indata
 )::Union{LibDeflateError, Int}
     GC.@preserve outdata indata unsafe_compress!(
         compressor,
         pointer(outdata),
-        length(outdata),
+        sizeof(outdata),
         pointer(indata),
-        length(indata)
+        sizeof(indata)
     )
 end
 
@@ -279,10 +293,10 @@ in the Julia standard library.
 
 See also: [`crc32`](@ref)
 """
-function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer, start::UInt32=UInt32(0))
+function unsafe_crc32(inptr::Ptr, n_in::Integer, start::UInt32=UInt32(0))
     return ccall(
         (:libdeflate_crc32, libdeflate),
-        UInt32, (UInt, Ptr{UInt8}, UInt),
+        UInt32, (UInt32, Ptr{UInt8}, UInt),
         start, inptr, n_in
     )
 end
@@ -293,28 +307,68 @@ end
 Calculate the crc32 checksum of the byte vector `data` and seed `start`.
 Note that crc32 is a different and slower algorithm than the `crc32c` provided
 in the Julia standard library.
+
+See also: [`unsafe_crc32`](@ref)
 """
-function crc32(data::Vector{UInt8}, start::UInt32=UInt32(0))
-    GC.@preserve data unsafe_crc32(pointer(data), length(data), start)
+function crc32(data, start::UInt32=UInt32(0))
+    GC.@preserve data unsafe_crc32(pointer(data), sizeof(data), start)
+end
+
+"""
+    unsafe_adler32(data, start=UInt32(1)) -> UInt32
+
+Calculate the adler32 checksum of the first `n_in` of the pointer `inptr`,
+with seed `start` (default is 1).
+
+See also: [`adler32`](@ref)
+"""
+function unsafe_adler32(inptr::Ptr, n_in::Integer, start::UInt32=UInt32(1))
+    return ccall(
+        (:libdeflate_adler32, libdeflate),
+        UInt32, (UInt32, Ptr{UInt8}, UInt),
+        start, inptr, n_in
+    )
+end
+
+"""
+    adler32(data, start=UInt32(1)) -> UInt32
+
+Calculate the adler32 checksum of the byte vector `data` and seed `start`.
+
+See also: [`unsafe_adler32`](@ref)
+"""
+function adler32(data, start::UInt32=UInt32(1))
+    GC.@preserve data unsafe_crc32(pointer(data), sizeof(data), start)
 end
 
 include("gzip.jl")
+include("zlib.jl")
 
 export Decompressor,
        Compressor,
 
-       LibDeflateError,
        LibDeflateErrors,
+       LibDeflateError,
+
        unsafe_decompress!,
        decompress!,
-       unsafe_gzip_decompress!,
-       gzip_decompress!,
        unsafe_compress!,
        compress!,
+
+       unsafe_gzip_decompress!,
+       gzip_decompress!,
        unsafe_gzip_compress!,
        gzip_compress!,
+
+       unsafe_zlib_decompress!,
+       zlib_decompress!,
+       unsafe_zlib_compress!,
+       zlib_compress!,
+
        unsafe_crc32,
        crc32,
+       unsafe_adler32,
+       adler32,
 
        unsafe_parse_gzip_header,
        is_valid_extra_data
