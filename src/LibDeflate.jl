@@ -2,6 +2,43 @@ module LibDeflate
 
 using libdeflate_jll
 
+module LibDeflateErrors
+
+const ERRORS = [
+    (:deflate_bad_data, "DEFLATE: DEFLATE payload is incorrectly formatted"),
+    (:deflate_input_too_short, "DEFLATE: Input data too short"),
+    (:deflate_insufficient_space, "DEFLATE: Insufficient space at output"),
+    (:gzip_header_too_short, "Gzip: Header too short"),
+    (:gzip_bad_header, "Gzip: Bad header"),
+    (:gzip_no_null, "Gzip: Unterminated null string"),
+    (:gzip_bad_crc16, "Gzip: Header crc16 check sum does not match"),
+    (:gzip_bad_crc32, "Gzip: Payload crc32 check sum does not match"),
+    (:gzip_extra_too_long, "Gzip: Extra data fields too long"),
+    (:gzip_bad_extra, "Gzip: Extra data fields invalid"),
+
+]
+
+expr = :(@enum LibDeflateError::UInt8)
+for (sym, msg) in ERRORS
+    push!(expr.args, sym)
+end
+eval(expr)
+
+@doc """
+    LibDeflateError
+
+An enum representing that LibDeflate encountered an error. The numerical value
+of the errors are not stable across non-breaking releases, but their names are.
+Successful operations will never return a `LibDeflateError`
+"""
+LibDeflateError
+
+Base.print(io::IO, x::LibDeflateError) = print(io, ERRORS[Integer(x)+1][2])
+export LibDeflateError
+end # module
+
+using .LibDeflateErrors
+
 # Must be mutable for the GC to be able to interact with it
 """
     Decompressor()
@@ -65,42 +102,31 @@ function free_compressor(compressor::Compressor)
 end
 
 # Compression and decompression functions
-# Types and constants
-const LIBDEFLATE_SUCCESS            = Cint(0)
-const LIBDEFLATE_BAD_DATA           = Cint(1)
-const LIBDEFLATE_SHORT_INPUT        = Cint(2)
-const LIBDEFLATE_INSUFFICIENT_SPACE = Cint(3)
-
-"""
-    LibDeflateError(message::String)
-
-`LibDeflate` failed with `message`.
-"""
-struct LibDeflateError <: Exception
-    msg::String
-end
-
-@noinline function check_return_code(code)
-    iszero(code) && return nothing
-    message = if code == LIBDEFLATE_BAD_DATA
-        "libdeflate 1: bad data"
-    elseif code == LIBDEFLATE_SHORT_INPUT
-        "libdeflate 2: short input"
-    elseif code == LIBDEFLATE_INSUFFICIENT_SPACE
-        "libdeflate 2: insufficient space"
-    end
-    throw(LibDeflateError(message))
-end
 
 # Raw C call - do not export this
-function _unsafe_decompress!(decompressor::Decompressor,
-                             outptr::Ptr{UInt8}, outlen::Integer,
-                             inptr::Ptr{UInt8}, inlen::Integer, nptr::Ptr)
-    status = ccall((:libdeflate_deflate_decompress, libdeflate), UInt,
-                  (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt, Ptr{UInt}),
-                   decompressor, inptr, inlen, outptr, outlen, nptr)
-    check_return_code(status)
-    return nothing
+function _unsafe_decompress!(
+    decompressor::Decompressor,
+    outptr::Ptr{UInt8},
+    outlen::Integer,
+    inptr::Ptr{UInt8},
+    inlen::Integer,
+    nptr::Ptr
+)::Union{LibDeflateError, Nothing}
+    status = ccall(
+        (:libdeflate_deflate_decompress, libdeflate),
+        UInt,
+        (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt, Ptr{UInt}),
+        decompressor, inptr, inlen, outptr, outlen, nptr
+    )
+    if status == Cint(1)
+        return LibDeflateErrors.deflate_bad_data
+    elseif status == Cint(2)
+        return LibDeflateErrors.deflate_input_too_short
+    elseif status == Cint(3)
+        return LibDeflateErrors.deflate_insufficient_space
+    else
+        return nothing
+    end
 end
 
 """
@@ -120,21 +146,31 @@ See also: [`decompress!`](@ref)
 """
 function unsafe_decompress! end
 
-function unsafe_decompress!(::Base.HasLength, decompressor::Decompressor,
-                            outptr::Ptr{UInt8}, n_out::Integer,
-                            inptr::Ptr{UInt8}, n_in::Integer)
-    _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, C_NULL)
-    return n_out
+function unsafe_decompress!(
+    ::Base.HasLength,
+    decompressor::Decompressor,
+    outptr::Ptr{UInt8},
+    n_out::Integer,
+    inptr::Ptr{UInt8},
+    n_in::Integer
+)::Union{LibDeflateError, Int}
+    y = _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, C_NULL)
+    y isa LibDeflateError ? y : Int(n_out)
 end
 
-function unsafe_decompress!(::Base.SizeUnknown, decompressor::Decompressor,
-                            outptr::Ptr{UInt8}, n_out::Integer,
-                            inptr::Ptr{UInt8}, n_in::Integer)
-    GC.@preserve decompressor begin
+function unsafe_decompress!(
+    ::Base.SizeUnknown,
+    decompressor::Decompressor,
+    outptr::Ptr{UInt8},
+    n_out::Integer,
+    inptr::Ptr{UInt8},
+    n_in::Integer
+)::Union{LibDeflateError, Int}
+    y = GC.@preserve decompressor begin
         retptr = pointer_from_objref(decompressor)
         _unsafe_decompress!(decompressor, outptr, n_out, inptr, n_in, retptr)
     end
-    return decompressor.actual_nbytes_ret % Int
+    y isa LibDeflateError ? y : (decompressor.actual_nbytes_ret % Int)
 end
 
 """
@@ -150,20 +186,39 @@ Return the number of bytes written to `outdata`.
 function decompress! end
 
 # Decompress method with length known (preferred)
-function decompress!(decompressor::Decompressor,
-                     outdata::Vector{UInt8}, indata::Vector{UInt8}, n_out::Integer)
+function decompress!(
+    decompressor::Decompressor,
+    outdata::Vector{UInt8},
+    indata::Vector{UInt8},
+    n_out::Integer
+)::Union{LibDeflateError, Int}
     if length(outdata) < n_out
-        throw(ValueError("n_out must be less than or equal to length of outdata"))
+        throw(ArgumentError("n_out must be less than or equal to length of outdata"))
     end
-    GC.@preserve outdata indata unsafe_decompress!(Base.HasLength(),
-        decompressor, pointer(outdata), n_out, pointer(indata), length(indata))
+    GC.@preserve outdata indata unsafe_decompress!(
+        Base.HasLength(),
+        decompressor,
+        pointer(outdata),
+        n_out,
+        pointer(indata),
+        length(indata)
+    )
 end
 
 # Decompress method with length unknown (not preferred)
-function decompress!(decompressor::Decompressor,
-                     outdata::Vector{UInt8}, indata::Vector{UInt8})
-    GC.@preserve outdata indata unsafe_decompress!(Base.SizeUnknown(),
-        decompressor, pointer(outdata), length(outdata), pointer(indata), length(indata))
+function decompress!(
+    decompressor::Decompressor,
+    outdata::Vector{UInt8},
+    indata::Vector{UInt8}
+)::Union{LibDeflateError, Int}
+    GC.@preserve outdata indata unsafe_decompress!(
+        Base.SizeUnknown(),
+        decompressor,
+        pointer(outdata),
+        length(outdata),
+        pointer(indata),
+        length(indata)
+    )
 end
 
 """
@@ -175,15 +230,20 @@ space `n_out`, throw an error.
 
 See also: [`compress!`](@ref)
 """
-function unsafe_compress!(compressor::Compressor, outptr::Ptr{UInt8}, n_out::Integer,
-                          inptr::Ptr{UInt8}, n_in::Integer)
-    bytes = ccall((:libdeflate_deflate_compress, libdeflate), UInt,
-            (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt),
-            compressor, inptr, n_in, outptr, n_out)
-
-    if iszero(bytes)
-        throw(LibDeflateError("Output buffer too small"))
-    end
+function unsafe_compress!(
+    compressor::Compressor,
+    outptr::Ptr{UInt8},
+    n_out::Integer,
+    inptr::Ptr{UInt8},
+    n_in::Integer
+)::Union{LibDeflateError, Int}
+    bytes = ccall(
+        (:libdeflate_deflate_compress, libdeflate),
+        UInt,
+        (Ptr{Nothing}, Ptr{UInt8}, UInt, Ptr{UInt8}, UInt),
+        compressor, inptr, n_in, outptr, n_out
+    )
+    iszero(bytes) && return LibDeflateErrors.deflate_insufficient_space
     return bytes % Int
 end
 
@@ -195,10 +255,18 @@ bytes of `outdata` using the DEFLATE algorithm.
 
 The output must fit in `outdata`. Return the number of bytes written to `outdata`.
 """
-function compress!(compressor::Compressor,
-                   outdata::Vector{UInt8}, indata::Vector{UInt8})
-    GC.@preserve outdata indata unsafe_compress!(compressor, pointer(outdata),
-        length(outdata), pointer(indata), length(indata))
+function compress!(
+    compressor::Compressor,
+    outdata::Vector{UInt8},
+    indata::Vector{UInt8}
+)::Union{LibDeflateError, Int}
+    GC.@preserve outdata indata unsafe_compress!(
+        compressor,
+        pointer(outdata),
+        length(outdata),
+        pointer(indata),
+        length(indata)
+    )
 end
 
 """
@@ -212,8 +280,11 @@ in the Julia standard library.
 See also: [`crc32`](@ref)
 """
 function unsafe_crc32(inptr::Ptr{UInt8}, n_in::Integer, start::UInt32=UInt32(0))
-    return ccall((:libdeflate_crc32, libdeflate),
-               UInt32, (UInt, Ptr{UInt8}, UInt), start, inptr, n_in)
+    return ccall(
+        (:libdeflate_crc32, libdeflate),
+        UInt32, (UInt, Ptr{UInt8}, UInt),
+        start, inptr, n_in
+    )
 end
 
 """
@@ -233,6 +304,7 @@ export Decompressor,
        Compressor,
 
        LibDeflateError,
+       LibDeflateErrors,
        unsafe_decompress!,
        decompress!,
        unsafe_gzip_decompress!,

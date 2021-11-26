@@ -23,20 +23,20 @@ end
     v = Vector{UInt8}("Hello, there!")
     c = Compressor()
     d = Decompressor()
-    @test_throws LibDeflate.LibDeflateError compress!(c, zeros(UInt8, 16), v)
+    @test compress!(c, zeros(UInt8, 16), v) == LibDeflateErrors.deflate_insufficient_space
 
     # Not compressed data
-    @test_throws LibDeflate.LibDeflateError decompress!(d, zeros(UInt8, 512), rand(UInt8, 32))
+    @test decompress!(d, zeros(UInt8, 512), rand(UInt8, 32)) == LibDeflateErrors.deflate_bad_data
 
     # Decompressed data too short
     v = zeros(UInt8, 256)
     bytes = compress!(c, v, Vector{UInt8}("ABC"^51))
     compressed = v[1:bytes]
-    @test_throws LibDeflate.LibDeflateError decompress!(d, zeros(UInt8, 1024), compressed, 150)
+    @test decompress!(d, zeros(UInt8, 1024), compressed, 150) == LibDeflateErrors.deflate_insufficient_space
 
     # Decompressed data too long
-    @test_throws LibDeflate.LibDeflateError decompress!(d, zeros(UInt8, 32), compressed)
-    @test_throws LibDeflate.LibDeflateError decompress!(d, zeros(UInt8, 1024), compressed, 160)
+    @test decompress!(d, zeros(UInt8, 32), compressed) == LibDeflateErrors.deflate_insufficient_space
+    @test decompress!(d, zeros(UInt8, 1024), compressed, 160) == LibDeflateErrors.deflate_input_too_short
 end
 
 @testset "Compression" begin

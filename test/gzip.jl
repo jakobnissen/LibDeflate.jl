@@ -27,12 +27,12 @@ end
         # We merely test it doesn't fail
         @test test_parse(data) !== nothing 
         data[2] = 0x00
-        @test_throws LibDeflateError test_parse(data)
+        @test test_parse(data) == LibDeflateErrors.gzip_bad_extra
         data[2] = 0xa0
         push!(data, 0x00)
-        @test_throws LibDeflateError test_parse(data)
+        @test test_parse(data) == LibDeflateErrors.gzip_extra_too_long
         pop!(data)
-        @test_throws LibDeflateError test_parse(data[1:end-1])
+        @test test_parse(data[1:end-1]) == LibDeflateErrors.gzip_extra_too_long
         data = empty!(copy(data))
         @test test_parse(data) !== nothing 
     end
@@ -69,7 +69,6 @@ function test_header_example(data::Vector{UInt8}, header::LibDeflate.GzipHeader)
 end
 
 @testset "Parse header" begin
-
     header = unsafe_parse_gzip_header(pointer(header_data), UInt(100))[2]
     test_header_example(header_data, header)
     header = unsafe_parse_gzip_header(pointer(header_data), UInt(100), LibDeflate.GzipExtraField[])[2]
