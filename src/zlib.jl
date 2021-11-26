@@ -6,7 +6,7 @@
 
 """
     zlib_decompress!(
-        ::Decompressor, output::Array, input, [n_out::Integer]
+        ::Decompressor, output::Union{Array, SubArray}, input, [n_out::Integer]
     )::Union{LibDeflateError, Int}
 
 Zlib decompress from `input` to `output`. `input` must have `pointer(x)`
@@ -22,7 +22,7 @@ function zlib_decompress! end
 
 function zlib_decompress!(
     decompressor::Decompressor,
-    output::Array,
+    output::Union{Array, SubArray}
     input
 )::Union{LibDeflateError, Int}
     GC.@preserve output input unsafe_zlib_decompress!(
@@ -37,7 +37,7 @@ end
 
 function zlib_decompress!(
     decompressor::Decompressor,
-    output::Array,
+    output::Union{Array, SubArray}
     input,
     n_out::Integer
 )::Union{LibDeflateError, Int}
