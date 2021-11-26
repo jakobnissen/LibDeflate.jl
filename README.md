@@ -1,5 +1,8 @@
 # LibDeflate.jl
 
+![CI](https://github.com/jakobnissen/LibDeflate.jl/workflows/CI/badge.svg)
+[![Codecov](https://codecov.io/gh/jakobnissen/LibDeflate.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/jakobnissen/LibDeflate.jl)
+
 This package provides Julia bindings for [libdeflate](https://github.com/ebiggers/libdeflate).
 
 Libdeflate is a heavily optimized implementation of the DEFLATE compression algorithm used in the zip, bgzip and gzip formats. Unlike libz or gzip, libdeflate does not support streaming, and so is intended for use in of files that fit in-memory or for block-compressed files like bgzip. But it is significantly faster than either libz or gzip.
