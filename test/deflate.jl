@@ -26,17 +26,21 @@ end
     @test compress!(c, zeros(UInt8, 16), v) == LibDeflateErrors.deflate_insufficient_space
 
     # Not compressed data
-    @test decompress!(d, zeros(UInt8, 512), rand(UInt8, 32)) == LibDeflateErrors.deflate_bad_payload
+    @test decompress!(d, zeros(UInt8, 512), rand(UInt8, 32)) ==
+        LibDeflateErrors.deflate_bad_payload
 
     # Decompressed data too short
     v = zeros(UInt8, 256)
     bytes = compress!(c, v, Vector{UInt8}("ABC"^51))
     compressed = v[1:bytes]
-    @test decompress!(d, zeros(UInt8, 1024), compressed, 150) == LibDeflateErrors.deflate_insufficient_space
+    @test decompress!(d, zeros(UInt8, 1024), compressed, 150) ==
+        LibDeflateErrors.deflate_insufficient_space
 
     # Decompressed data too long
-    @test decompress!(d, zeros(UInt8, 32), compressed) == LibDeflateErrors.deflate_insufficient_space
-    @test decompress!(d, zeros(UInt8, 1024), compressed, 160) == LibDeflateErrors.deflate_output_too_short
+    @test decompress!(d, zeros(UInt8, 32), compressed) ==
+        LibDeflateErrors.deflate_insufficient_space
+    @test decompress!(d, zeros(UInt8, 1024), compressed, 160) ==
+        LibDeflateErrors.deflate_output_too_short
 end
 
 @testset "Compression" begin
@@ -44,7 +48,7 @@ end
         vcat(rand(UInt8, 412), zeros(UInt8, 100)),
         rand(1:1000, 100),
         join(rand((['A', 'C', 'G', 'T']), 500)),
-        ("Na " * "na " ^ 15 * "Batman! ")^2
+        ("Na " * "na "^15 * "Batman! ")^2,
     ]
     outbuffer = zeros(UInt8, 512)
     for i in COMPRESSIBLE
@@ -58,13 +62,15 @@ end
     v1 = zeros(UInt8, 1024)
     compressor = Compressor()
     mem = WriteableMemory([1.0])
-    write_mem = WriteableMemory(view([1f0], 1:1))
+    write_mem = WriteableMemory(view([1.0f0], 1:1))
     mem = ReadableMemory("foo")
     mem = ReadableMemory(view(zeros(Float16, 2, 2), 1:2, 1:2))
     mem = ReadableMemory(SubString("foo", 1:2))
     mem = ReadableMemory(write_mem)
     @test_throws MethodError WriteableMemory(mem)
-    @test_throws MethodError compress!(compressor, "xxxxxxxxxxxxxxxxxxxxxxxxxx", UInt8[0x01, 0x02])
+    @test_throws MethodError compress!(
+        compressor, "xxxxxxxxxxxxxxxxxxxxxxxxxx", UInt8[0x01, 0x02]
+    )
     @test_throws MethodError compress!(compressor, v1, view(v1, 5:-1:1))
 end
 
@@ -72,7 +78,8 @@ end
 # codeczlib. So we can just compare it to the unsafe one
 @testset "Safe CRC" begin
     for testdata in ["", "foo", "abracadabra!"]
-        @test crc32(collect(codeunits(testdata))) == unsafe_crc32(pointer(testdata), ncodeunits(testdata))
+        @test crc32(collect(codeunits(testdata))) ==
+            unsafe_crc32(pointer(testdata), ncodeunits(testdata))
     end
 end
 
@@ -91,34 +98,48 @@ end
     backbuffer2 = similar(outbuffer)
     unsafe_backbuffer1 = similar(outbuffer)
     unsafe_backbuffer2 = similar(outbuffer)
-    
+
     compressor = Compressor()
     decompressor = Decompressor()
 
     for i in INPUT_DATA
         v = Vector{UInt8}(i)
 
-        c_bytes_unsafe = unsafe_compress!(compressor, pointer(unsafe_outbuffer),
-                                          length(outbuffer), pointer(v), length(v))
+        c_bytes_unsafe = unsafe_compress!(
+            compressor, pointer(unsafe_outbuffer), length(outbuffer), pointer(v), length(v)
+        )
         c_bytes_safe = compress!(compressor, outbuffer, v)
 
         @test c_bytes_unsafe == c_bytes_safe
         @test unsafe_outbuffer[1:c_bytes_unsafe] == outbuffer[1:c_bytes_safe]
 
-        d_bytes_unsafe1 = unsafe_decompress!(Base.HasLength(), decompressor,
-                                            pointer(unsafe_backbuffer1), length(v),
-                                            pointer(unsafe_outbuffer), c_bytes_unsafe)
+        d_bytes_unsafe1 = unsafe_decompress!(
+            Base.HasLength(),
+            decompressor,
+            pointer(unsafe_backbuffer1),
+            length(v),
+            pointer(unsafe_outbuffer),
+            c_bytes_unsafe,
+        )
 
-        d_bytes_unsafe2 = unsafe_decompress!(Base.SizeUnknown(), decompressor,
-                                             pointer(unsafe_backbuffer2), length(unsafe_backbuffer2),
-                                             pointer(unsafe_outbuffer), c_bytes_unsafe)
+        d_bytes_unsafe2 = unsafe_decompress!(
+            Base.SizeUnknown(),
+            decompressor,
+            pointer(unsafe_backbuffer2),
+            length(unsafe_backbuffer2),
+            pointer(unsafe_outbuffer),
+            c_bytes_unsafe,
+        )
 
         d_bytes_safe1 = decompress!(decompressor, backbuffer1, outbuffer, length(v))
         d_bytes_safe2 = decompress!(decompressor, backbuffer2, outbuffer)
 
         @test d_bytes_safe1 == d_bytes_safe2 == d_bytes_unsafe1 == d_bytes_unsafe2
 
-        @test v == backbuffer1[1:d_bytes_safe1] == backbuffer2[1:d_bytes_safe1] ==
-              unsafe_backbuffer1[1:d_bytes_safe1] == unsafe_backbuffer2[1:d_bytes_safe1]
+        @test v ==
+            backbuffer1[1:d_bytes_safe1] ==
+            backbuffer2[1:d_bytes_safe1] ==
+            unsafe_backbuffer1[1:d_bytes_safe1] ==
+            unsafe_backbuffer2[1:d_bytes_safe1]
     end
 end

@@ -16,39 +16,39 @@ Dummy module to contain the variants of the `LibDeflateError` enum.
 """
 module LibDeflateErrors
 
-@enum LibDeflateError::UInt8 begin
-    deflate_bad_payload
-    deflate_output_too_short
-    deflate_insufficient_space
-    gzip_header_too_short
-    gzip_bad_magic_bytes
-    gzip_not_deflate
-    gzip_string_not_null_terminated
-    gzip_null_in_string
-    gzip_bad_header_crc16
-    gzip_bad_crc32
-    gzip_extra_too_long
-    gzip_bad_extra
-    zlib_input_too_short
-    zlib_not_deflate
-    zlib_wrong_window_size
-    zlib_needs_compression_dict
-    zlib_bad_header_check
-    zlib_bad_adler32
-    zlib_insufficient_space
-end
+    @enum LibDeflateError::UInt8 begin
+        deflate_bad_payload
+        deflate_output_too_short
+        deflate_insufficient_space
+        gzip_header_too_short
+        gzip_bad_magic_bytes
+        gzip_not_deflate
+        gzip_string_not_null_terminated
+        gzip_null_in_string
+        gzip_bad_header_crc16
+        gzip_bad_crc32
+        gzip_extra_too_long
+        gzip_bad_extra
+        zlib_input_too_short
+        zlib_not_deflate
+        zlib_wrong_window_size
+        zlib_needs_compression_dict
+        zlib_bad_header_check
+        zlib_bad_adler32
+        zlib_insufficient_space
+    end
 
-@doc """
+    @doc """
+        LibDeflateError
+
+    A `UInt8` enum representing that LibDeflate encountered an error. The numerical value
+    of the errors are not stable across non-breaking releases, but their names are.
+    Code checking for specific errors should check by e.g. ` == LibDeflateErrors.gzip_not_deflate`.
+    Successful operations will never return a `LibDeflateError`.
+    """
     LibDeflateError
 
-A `UInt8` enum representing that LibDeflate encountered an error. The numerical value
-of the errors are not stable across non-breaking releases, but their names are.
-Code checking for specific errors should check by e.g. ` == LibDeflateErrors.gzip_not_deflate`.
-Successful operations will never return a `LibDeflateError`.
-"""
-LibDeflateError
-
-export LibDeflateError
+    export LibDeflateError
 end # module
 
 using .LibDeflateErrors
@@ -74,12 +74,14 @@ end
 # We can only write to types where we know they are mutable, that
 # `pointer` and `sizeof` are correct (unlike e.g. subarrays with non-1-strides),
 # and where all bitpatterns are legal values.
-function WriteableMemory(x::Union{
+function WriteableMemory(
+    x::Union{
         Array{T},
-        SubArray{T, N, <:Array{T}, <:Tuple{Vararg{AbstractUnitRange}}} where N,
-        WriteableMemory
-}) where {T <: Union{Base.BitInteger, Base.IEEEFloat}}
-    WriteableMemory(pointer(x), sizeof(x))
+        SubArray{T,N,<:Array{T},<:Tuple{Vararg{AbstractUnitRange}}} where N,
+        WriteableMemory,
+    },
+) where {T<:Union{Base.BitInteger,Base.IEEEFloat}}
+    return WriteableMemory(pointer(x), sizeof(x))
 end
 
 """
@@ -101,22 +103,24 @@ end
 # We can read from data with the same pointer and stride requirements, but
 # the data only needs to be bitvalues. Also, we can read from immutable structs.
 # We let T be a free parameter so we can check whether it is a bitstype
-function ReadableMemory(x::Union{
+function ReadableMemory(
+    x::Union{
         Array,
-        SubArray{T, N, <:Array, <:Tuple{Vararg{AbstractUnitRange}}} where {T, N},
+        SubArray{T,N,<:Array,<:Tuple{Vararg{AbstractUnitRange}}} where {T,N},
         String,
         SubString{String},
         WriteableMemory,
-        ReadableMemory
-})
+        ReadableMemory,
+    },
+)
     # This check happens to also work for WriteableMemory and strings.
     isbitstype(eltype(x)) || error("Container element type must be a bitstype")
-    ReadableMemory(pointer(x), sizeof(x))
+    return ReadableMemory(pointer(x), sizeof(x))
 end
 
-Base.pointer(x::Union{ReadableMemory, WriteableMemory}) = x.ptr
-Base.sizeof(x::Union{ReadableMemory, WriteableMemory}) = x.len % Int
-Base.eltype(::Union{Type{ReadableMemory}, Type{WriteableMemory}}) = Nothing
+Base.pointer(x::Union{ReadableMemory,WriteableMemory}) = x.ptr
+Base.sizeof(x::Union{ReadableMemory,WriteableMemory}) = x.len % Int
+Base.eltype(::Union{Type{ReadableMemory},Type{WriteableMemory}}) = Nothing
 
 # Must be mutable for the GC to be able to interact with it
 """
@@ -139,12 +143,8 @@ end
 Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Decompressor) = x.ptr
 
 function Decompressor()
-    decompressor = Decompressor(0,
-        ccall(
-            (:libdeflate_alloc_decompressor, libdeflate),
-            Ptr{Nothing},
-            ()
-        )
+    decompressor = Decompressor(
+        0, ccall((:libdeflate_alloc_decompressor, libdeflate), Ptr{Nothing}, ())
     )
     finalizer(free_decompressor, decompressor)
     return decompressor
@@ -152,10 +152,7 @@ end
 
 function free_decompressor(decompressor::Decompressor)
     ccall(
-        (:libdeflate_free_decompressor, libdeflate), 
-        Nothing,
-        (Ptr{Nothing},),
-        decompressor
+        (:libdeflate_free_decompressor, libdeflate), Nothing, (Ptr{Nothing},), decompressor
     )
     return nothing
 end
@@ -182,10 +179,7 @@ Base.unsafe_convert(::Type{Ptr{Nothing}}, x::Compressor) = x.ptr
 function Compressor(compresslevel::Integer=DEFAULT_COMPRESSION_LEVEL)
     compresslevel in 1:12 || throw(ArgumentError("Compresslevel must be in 1:12"))
     ptr = ccall(
-        (:libdeflate_alloc_compressor, libdeflate),
-        Ptr{Nothing},
-        (Csize_t,),
-        compresslevel
+        (:libdeflate_alloc_compressor, libdeflate), Ptr{Nothing}, (Csize_t,), compresslevel
     )
     compressor = Compressor(compresslevel, ptr)
     finalizer(free_compressor, compressor)
@@ -207,13 +201,18 @@ function _unsafe_decompress!(
     out_len::Integer,
     in_ptr::Ptr,
     inlen::Integer,
-    nptr::Ptr
-)::Union{LibDeflateError, Nothing}
+    nptr::Ptr,
+)::Union{LibDeflateError,Nothing}
     status = ccall(
         (:libdeflate_deflate_decompress, libdeflate),
         Csize_t,
         (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t, Ptr{UInt}),
-        decompressor, in_ptr, inlen, out_ptr, out_len, nptr
+        decompressor,
+        in_ptr,
+        inlen,
+        out_ptr,
+        out_len,
+        nptr,
     )
     if status == Cint(1)
         return LibDeflateErrors.deflate_bad_payload
@@ -253,10 +252,10 @@ function unsafe_decompress!(
     out_ptr::Ptr,
     n_out::Integer,
     in_ptr::Ptr,
-    n_in::Integer
-)::Union{LibDeflateError, Int}
+    n_in::Integer,
+)::Union{LibDeflateError,Int}
     y = _unsafe_decompress!(decompressor, out_ptr, n_out, in_ptr, n_in, C_NULL)
-    y isa LibDeflateError ? y : Int(n_out)
+    return y isa LibDeflateError ? y : Int(n_out)
 end
 
 function unsafe_decompress!(
@@ -265,13 +264,13 @@ function unsafe_decompress!(
     out_ptr::Ptr,
     n_out::Integer,
     in_ptr::Ptr,
-    n_in::Integer
-)::Union{LibDeflateError, Int}
+    n_in::Integer,
+)::Union{LibDeflateError,Int}
     y = GC.@preserve decompressor begin
         retptr = pointer_from_objref(decompressor)
         _unsafe_decompress!(decompressor, out_ptr, n_out, in_ptr, n_in, retptr)
     end
-    y isa LibDeflateError ? y : (decompressor.actual_nbytes_ret % Int)
+    return y isa LibDeflateError ? y : (decompressor.actual_nbytes_ret % Int)
 end
 
 """
@@ -292,7 +291,7 @@ function decompress! end
 # Decompress method with length known (preferred)
 function decompress!(
     decompressor::Decompressor, out_data, in_data, n_out::Integer
-)::Union{LibDeflateError, Int}
+)::Union{LibDeflateError,Int}
     GC.@preserve out_data in_data begin
         read = ReadableMemory(in_data)
         write = WriteableMemory(out_data)
@@ -303,7 +302,7 @@ function decompress!(
             pointer(write),
             n_out,
             pointer(read),
-            sizeof(read)
+            sizeof(read),
         )
     end
 end
@@ -311,7 +310,7 @@ end
 # Decompress method with length unknown (not preferred)
 function decompress!(
     decompressor::Decompressor, out_data, in_data
-)::Union{LibDeflateError, Int}
+)::Union{LibDeflateError,Int}
     GC.@preserve out_data in_data begin
         read = ReadableMemory(in_data)
         write = WriteableMemory(out_data)
@@ -321,7 +320,7 @@ function decompress!(
             pointer(write),
             sizeof(write),
             pointer(read),
-            sizeof(read)
+            sizeof(read),
         )
     end
 end
@@ -339,17 +338,17 @@ Return the number of written bytes to the output, or a `LibDeflateError`.
 See also: [`compress!`](@ref)
 """
 function unsafe_compress!(
-    compressor::Compressor,
-    out_ptr::Ptr,
-    n_out::Integer,
-    in_ptr::Ptr,
-    n_in::Integer
-)::Union{LibDeflateError, Int}
+    compressor::Compressor, out_ptr::Ptr, n_out::Integer, in_ptr::Ptr, n_in::Integer
+)::Union{LibDeflateError,Int}
     bytes = ccall(
         (:libdeflate_deflate_compress, libdeflate),
         Csize_t,
         (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t),
-        compressor, in_ptr, n_in, out_ptr, n_out
+        compressor,
+        in_ptr,
+        n_in,
+        out_ptr,
+        n_out,
     )
     iszero(bytes) && return LibDeflateErrors.deflate_insufficient_space
     return bytes % Int
@@ -364,18 +363,12 @@ Data must fit in `out_data`.
 
 Return the number of written bytes to the output, or a `LibDeflateError`.
 """
-function compress!(
-    compressor::Compressor, out_data, in_data
-)::Union{LibDeflateError, Int}
+function compress!(compressor::Compressor, out_data, in_data)::Union{LibDeflateError,Int}
     GC.@preserve out_data in_data begin
         read = ReadableMemory(in_data)
         write = WriteableMemory(out_data)
         unsafe_compress!(
-            compressor,
-            pointer(write),
-            sizeof(write),
-            pointer(read),
-            sizeof(read)
+            compressor, pointer(write), sizeof(write), pointer(read), sizeof(read)
         )
     end
 end
@@ -393,8 +386,11 @@ See also: [`crc32`](@ref)
 function unsafe_crc32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(0))
     return ccall(
         (:libdeflate_crc32, libdeflate),
-        UInt32, (UInt32, Ptr{UInt8}, Csize_t),
-        start, in_ptr, n_in
+        UInt32,
+        (UInt32, Ptr{UInt8}, Csize_t),
+        start,
+        in_ptr,
+        n_in,
     )
 end
 
@@ -425,8 +421,11 @@ See also: [`adler32`](@ref)
 function unsafe_adler32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(1))
     return ccall(
         (:libdeflate_adler32, libdeflate),
-        UInt32, (UInt32, Ptr{UInt8}, Csize_t),
-        start, in_ptr, n_in
+        UInt32,
+        (UInt32, Ptr{UInt8}, Csize_t),
+        start,
+        in_ptr,
+        n_in,
     )
 end
 
@@ -448,36 +447,29 @@ include("gzip.jl")
 include("zlib.jl")
 
 export Decompressor,
-       Compressor,
-
-       LibDeflateErrors,
-       LibDeflateError,
-
-       WriteableMemory,
-       ReadableMemory,
-
-       unsafe_decompress!,
-       decompress!,
-       unsafe_compress!,
-       compress!,
-
-       unsafe_gzip_decompress!,
-       gzip_decompress!,
-       unsafe_gzip_compress!,
-       gzip_compress!,
-
-       unsafe_zlib_decompress!,
-       zlib_decompress!,
-       unsafe_zlib_compress!,
-       zlib_compress!,
-
-       unsafe_crc32,
-       crc32,
-       unsafe_adler32,
-       adler32,
-
-       unsafe_parse_gzip_header,
-       parse_gzip_header,
-       is_valid_extra_data
+    Compressor,
+    LibDeflateErrors,
+    LibDeflateError,
+    WriteableMemory,
+    ReadableMemory,
+    unsafe_decompress!,
+    decompress!,
+    unsafe_compress!,
+    compress!,
+    unsafe_gzip_decompress!,
+    gzip_decompress!,
+    unsafe_gzip_compress!,
+    gzip_compress!,
+    unsafe_zlib_decompress!,
+    zlib_decompress!,
+    unsafe_zlib_compress!,
+    zlib_compress!,
+    unsafe_crc32,
+    crc32,
+    unsafe_adler32,
+    adler32,
+    unsafe_parse_gzip_header,
+    parse_gzip_header,
+    is_valid_extra_data
 
 end # module
