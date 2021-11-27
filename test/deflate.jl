@@ -54,6 +54,20 @@ end
     end
 end
 
+@testset "Memory" begin
+    v1 = zeros(UInt8, 1024)
+    compressor = Compressor()
+    mem = WriteableMemory([1.0])
+    write_mem = WriteableMemory(view([1f0], 1:1))
+    mem = ReadableMemory("foo")
+    mem = ReadableMemory(view(zeros(Float16, 2, 2), 1:2, 1:2))
+    mem = ReadableMemory(SubString("foo", 1:2))
+    mem = ReadableMemory(write_mem)
+    @test_throws MethodError WriteableMemory(mem)
+    @test_throws MethodError compress!(compressor, "xxxxxxxxxxxxxxxxxxxxxxxxxx", UInt8[0x01, 0x02])
+    @test_throws MethodError compress!(compressor, v1, view(v1, 5:-1:1))
+end
+
 # Unsafe CRC is implicitly tested by decompressing gzip with
 # codeczlib. So we can just compare it to the unsafe one
 @testset "Safe CRC" begin

@@ -101,7 +101,7 @@ test_filename = "testfile.foo"
         n_bytes = unsafe_gzip_compress!(
             compressor, pointer(outdata), UInt(length(outdata)),
             pointer(data), UInt(sizeof(data)),
-            LibDeflate.SizedMemory(test_comment), LibDeflate.SizedMemory(test_filename),
+            LibDeflate.ReadableMemory(test_comment), LibDeflate.ReadableMemory(test_filename),
             nothing, true
         )
         decompressed = transcode(GzipDecompressor, outdata[1:n_bytes])

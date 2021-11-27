@@ -10,7 +10,7 @@ Libdeflate is a heavily optimized implementation of the DEFLATE compression algo
 This package provides simple functionality for working with raw DEFLATE payloads, zlib and gzip data. It is intended for internal use by other packages, not to be used directly by users. Hence, its interface is somewhat small.
 
 ### Interface
-Many functions have a  "safe" and an "unsafe" variant. The unsafe works with pointers, the safe with ordinary Julia objects.
+Many functions have a  "safe" and an "unsafe" variant. The unsafe works with pointers, the safe attempts to convert Julia objects to `ReadableMemory` or `WriteableMemory`, which are simply structs containing pointers.
 When possible, use the safe variants as the overhead is rather small.
 
 For more details on these functions, read their docstrings which define their API.
@@ -22,6 +22,8 @@ __Common exported types__
 * `Decompressor`: Create an object that decompresses using DEFLATE.
 * `Compressor(N)`: Create an object that compresses using DEFLATE level `N`.
 * `LibDeflateError`: An enum will all LibDeflate errors. Functions are either successful or return this.
+* `ReadableMemory`: A pointer and a length. Constructable from types that are pointer-readable.
+* `WriteableMemory`: A pointer and a length. Constructable from types that are pointer-writeable.
 
 __Working with DEFLATE payloads__
 * `(unsafe_)decompress!`: DEFLATE decompress payload.

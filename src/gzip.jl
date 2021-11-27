@@ -10,18 +10,8 @@ function next_zero(p::Ptr{UInt8}, i::UInt32, lastindex::UInt32)::Union{UInt32, L
     return LibDeflateErrors.gzip_string_not_null_terminated
 end
 
-# Convenience struct to avoid having to deal with so many pointers directly.
-struct SizedMemory
-    ptr::Ptr{UInt8}
-    len::UInt
-end
-
-SizedMemory(x) = SizedMemory(pointer(x), sizeof(x))
-Base.sizeof(x::SizedMemory) = x.len
-Base.pointer(x::SizedMemory) = x.ptr
-
 "Check if there are any 0x00 bytes in a block of memory"
-function any_zeros(mem::SizedMemory)::Bool
+function any_zeros(mem::ReadableMemory)::Bool
     i = UInt(1)
     while i ≤ sizeof(mem)
         unsafe_load(pointer(mem), i % Int) === 0x00 && return true
@@ -143,12 +133,16 @@ end
 
 Parse the input data, returning a `GzipHeader` object, or a `LibDeflateError`.
 The parser will not read more than `max_len` bytes.
-`input` must implement `sizeof` and `pointer`.
 If a vector of gzip
 extra data is passed, it will not allocate a new vector, but overwrite the given one.
 """
-function parse_gzip_header(in, extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing)
-    return unsafe_parse_gzip_header(pointer(in), sizeof(in), extra_data)
+function parse_gzip_header(
+    in, extra_data::Union{Vector{GzipExtraField}, Nothing}=nothing
+)::Union{LibDeflateError, Tuple{UInt32, GzipHeader}}
+    GC.@preserve in begin
+        read = ReadableMemory(in)
+        return unsafe_parse_gzip_header(pointer(read), sizeof(read), extra_data)
+    end
 end
 
 """
@@ -263,7 +257,6 @@ end
     )::Union{GzipDecompressResult, LibDeflateError}
 
 Gzip decompress the input data into `out`, and resize `out` to fit.
-`in_data` must implement `sizeof` and `pointer`.
 
 See also: [`unsafe_gzip_decompress!`](@ref)
 """
@@ -275,12 +268,13 @@ function gzip_decompress!(
     max_len::Integer=typemax(Int),
 )::Union{LibDeflateError, GzipDecompressResult}
     GC.@preserve in_data out_data begin
+        read = ReadableMemory(in_data)
         result = unsafe_gzip_decompress!(
             decompressor,
             out_data,
             UInt(max_len),
-            Ptr{UInt8}(pointer(in_data)),
-            sizeof(in_data) % UInt,
+            Ptr{UInt8}(pointer(read)),
+            sizeof(read) % UInt,
             extra_data
         )
     end
@@ -376,7 +370,7 @@ end
     gzip_compress!(
         compressor::Compressor,
         output::Vector{UInt8},
-        input
+        input::ReadableMemory
         comment=nothing,
         filename=nothing,
         extra=nothing,
@@ -384,10 +378,9 @@ end
     )::Union{LibDeflateError, Vector{UInt8}}
 
 Gzip compress `input` into `output` and resizing output to fit. Returns `output`.
-`input` must implement `sizeof` and `pointer`.
 
 Adds optional data `comment`, `filename`, `extra`. All these must be `nothing` if
-not applicable, or else implement `sizeof` and `pointer`.
+not applicable.
 * `comment` and `filename` must not include the byte `0x00`.
 * `extra` must be at most `typemax(UInt16)` bytes long.
 
@@ -405,32 +398,37 @@ function gzip_compress!(
     header_crc::Bool=false
 )::Union{LibDeflateError, Vector{UInt8}}
     # Resize output to maximal possible length
-    maxlen = max_out_len(
-        sizeof(input) % UInt,
-        comment === nothing ? UInt(0) : sizeof(comment) % UInt,
-        filename === nothing ? UInt(0) : sizeof(filename) % UInt,
-        extra === nothing ? UInt16(0) : sizeof(extra) % UInt16,
-        header_crc
-    )
-    # We add 8 extra bytes to make sure Libdeflate don't error due to off-by-one errors 
-    resize!(output, maxlen + 8)
+    GC.@preserve comment filename extra begin
+        mem_comment = comment === nothing ? nothing : ReadableMemory(comment)
+        mem_filename = filename === nothing ? nothing : ReadableMemory(filename)
+        mem_extra = extra === nothing ? nothing : ReadableMemory(extra)
 
-    GC.@preserve output input comment filename extra begin
-        mem_comment = comment === nothing ? nothing : SizedMemory(comment)
-        mem_filename = filename === nothing ? nothing : SizedMemory(filename)
-        mem_extra = extra === nothing ? nothing : SizedMemory(extra)
-
-        n_bytes = unsafe_gzip_compress!(
-            compressor,
-            pointer(output),
-            sizeof(output) % UInt,
-            pointer(input),
+        maxlen = max_out_len(
             sizeof(input) % UInt,
-            mem_comment,
-            mem_filename,
-            mem_extra,
+            mem_comment === nothing ? UInt(0) : sizeof(mem_comment) % UInt,
+            mem_filename === nothing ? UInt(0) : sizeof(mem_filename) % UInt,
+            mem_extra === nothing ? UInt16(0) : sizeof(mem_extra) % UInt16,
             header_crc
         )
+        
+        # We add 8 extra bytes to make sure Libdeflate don't error due to off-by-one errors 
+        resize!(output, maxlen + 8)
+
+        GC.@preserve output input begin
+            read = ReadableMemory(input)
+            write = WriteableMemory(output)
+            n_bytes = unsafe_gzip_compress!(
+                compressor,
+                pointer(write),
+                sizeof(write) % UInt,
+                pointer(read),
+                sizeof(read) % UInt,
+                mem_comment,
+                mem_filename,
+                mem_extra,
+                header_crc
+            )
+        end
     end
     n_bytes isa LibDeflateError && return n_bytes
     resize!(output, n_bytes % UInt)
@@ -442,9 +440,9 @@ end
         compressor::Compressor,
         out_ptr::Ptr, out_len::Integer,
         in_ptr::Ptr, in_len::Integer,
-        comment,
-        filename,
-        extra:,
+        comment::Union{Nothing, ReadableMemory},
+        filename::Union{Nothing, ReadableMemory},
+        extra::Union{Nothing, ReadableMemory},
         header_crc::Bool
     )::Union{LibDeflateError, Int}
 
@@ -452,7 +450,7 @@ Use the `Compressor` to gzip compress input at `in_ptr` and `in_len` bytes onwar
 to, `out_ptr`.
 If the resulting gzip data could be longer than `out_len`, return an error.
 Optionally, include gzip comment, filename or extra data. All these must be `nothing` if
-not applicable, or else implement `sizeof` and `pointer`.
+not applicable.
 
 Adds optional data `comment`, `filename`, `extra`. 
 * `comment` and `filename` must not include the byte `0x00`.
@@ -468,16 +466,16 @@ function unsafe_gzip_compress!(
     out_len::Integer,
     in_ptr::Ptr,
     in_len::Integer,
-    comment,
-    filename,
-    extra,
+    comment::Union{Nothing, ReadableMemory},
+    filename::Union{Nothing, ReadableMemory},
+    extra::Union{Nothing, ReadableMemory},
     header_crc::Bool,
 )::Union{LibDeflateError, Int}
     # Check output len is long enough
     max_out_len(
         in_len,
-        comment === nothing ? UInt(0) : sizeof(comment),
-        filename === nothing ? UInt(0) : sizeof(filename),
+        comment === nothing ? UInt(0) : sizeof(comment) % UInt,
+        filename === nothing ? UInt(0) : sizeof(filename) % UInt,
         if extra === nothing
             UInt16(0)
         else
@@ -492,12 +490,12 @@ function unsafe_gzip_compress!(
     header = 0x00088b1f
     if comment !== nothing
         # Check for absence of zero byte
-        any_zeros(SizedMemory(comment)) && return LibDeflateErrors.gzip_null_in_string
+        any_zeros(comment) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x10000000
     end
     if filename !== nothing
         # Check for absence of zero byte
-        any_zeros(SizedMemory(filename)) && return LibDeflateErrors.gzip_null_in_string
+        any_zeros(filename) && return LibDeflateErrors.gzip_null_in_string
         header |= 0x08000000
     end
     if extra !== nothing
@@ -506,7 +504,7 @@ function unsafe_gzip_compress!(
         header |= 0x04000000
     end
     header = ifelse(header_crc, header | 0x02000000, header)
-    ptr = out_ptr - 1
+    ptr = Ptr{UInt8}(out_ptr) - 1
     unsafe_store!(Ptr{UInt32}(ptr + 1), htol(header))
 
     # Add system time (take lower 32 bits if it overflows)
@@ -520,20 +518,20 @@ function unsafe_gzip_compress!(
     # Add in extra data
     if extra !== nothing
         unsafe_store!(Ptr{UInt16}(ptr + index), htol(sizeof(extra) % UInt16))
-        unsafe_copyto!(ptr + index + 2, pointer(extra), sizeof(extra))
+        unsafe_copyto!(ptr + index + 2, Ptr{UInt8}(pointer(extra)), sizeof(extra))
         index += UInt(2) + sizeof(extra)
     end
 
     # Add in filename
     if filename !== nothing
-        unsafe_copyto!(ptr + index, pointer(filename), sizeof(filename))
+        unsafe_copyto!(ptr + index, Ptr{UInt8}(pointer(filename)), sizeof(filename))
         index += sizeof(filename) + one(UInt) # null byte
         unsafe_store!(ptr + index - 1, 0x00)
     end
 
     # Add in comment
     if comment !== nothing
-        unsafe_copyto!(ptr + index, pointer(comment), sizeof(comment))
+        unsafe_copyto!(ptr + index, Ptr{UInt8}(pointer(comment)), sizeof(comment))
         index += sizeof(comment) + one(UInt) # null byte
         unsafe_store!(ptr + index - 1, 0x00)
     end

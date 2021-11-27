@@ -6,11 +6,10 @@
 
 """
     zlib_decompress!(
-        ::Decompressor, output::Array, input, [n_out::Integer]
+        ::Decompressor, output, input, [n_out::Integer]
     )::Union{LibDeflateError, Int}
 
-Zlib decompress from `input` to `output`. `input` must have `pointer(x)`
-and `sizeof(x)` implemented.
+Zlib decompress from `input` to `output`.
 If the precise number of decompressed bytes is known, pass it in as `n_out`
 for added performance. If it is wrong, the function will return an error.
 
@@ -21,35 +20,38 @@ See also: [`unsafe_zlib_decompress!`](@ref)
 function zlib_decompress! end
 
 function zlib_decompress!(
-    decompressor::Decompressor,
-    output::Array,
-    input
+    decompressor::Decompressor, output, input
 )::Union{LibDeflateError, Int}
-    GC.@preserve output input unsafe_zlib_decompress!(
-        Base.SizeUnknown(),
-        decompressor,
-        pointer(output),
-        sizeof(output),
-        pointer(input),
-        sizeof(input)
-    )
+    GC.@preserve output input begin
+        write = WriteableMemory(output)
+        read = ReadableMemory(input)
+        unsafe_zlib_decompress!(
+            Base.SizeUnknown(),
+            decompressor,
+            pointer(write),
+            sizeof(write),
+            pointer(read),
+            sizeof(read)
+        )
+    end
 end
 
 function zlib_decompress!(
-    decompressor::Decompressor,
-    output::Array,
-    input,
-    n_out::Integer
+    decompressor::Decompressor, output, input, n_out::Integer
 )::Union{LibDeflateError, Int}
-    n_out > sizeof(output) && return LibDeflateErrors.deflate_insufficient_space
-    GC.@preserve output input unsafe_zlib_decompress!(
-        Base.HasLength(),
-        decompressor,
-        pointer(output),
-        n_out,
-        pointer(input),
-        sizeof(input)
-    )
+    GC.@preserve output input begin
+        write = WriteableMemory(output)
+        read = ReadableMemory(input)
+        n_out > sizeof(write) && return LibDeflateErrors.deflate_insufficient_space
+        unsafe_zlib_decompress!(
+            Base.HasLength(),
+            decompressor,
+            pointer(write),
+            n_out,
+            pointer(read),
+            sizeof(read)
+        )
+    end
 end
 
 """
@@ -116,27 +118,28 @@ end
 
 """
     zlib_compress!(
-        ::Compressor, output::Array, input
+        ::Compressor, output, input
     )::Union{LibDeflateError, Int}
 
-Zlib compress from `input` to `output`. `input` must have `pointer(x)`
-and `sizeof(x)` implemented.
+Zlib compress from `input` to `output`.
 Return the number of bytes written, or a `LibDeflateError`.
 
 See also: [`unsafe_zlib_compress!`](@ref)
 """
 function zlib_compress!(
-    compressor::Compressor,
-    output::Array,
-    input
+    compressor::Compressor, output, input
 )::Union{LibDeflateError, Int}
-    GC.@preserve output input unsafe_zlib_compress!(
-        compressor,
-        pointer(output),
-        sizeof(output),
-        pointer(input),
-        sizeof(input)
-    )
+    GC.@preserve output input begin
+        write = WriteableMemory(output)
+        read = ReadableMemory(input)
+        unsafe_zlib_compress!(
+            compressor,
+            pointer(write),
+            sizeof(write),
+            pointer(read),
+            sizeof(read)
+        )
+    end
 end
 
 """
