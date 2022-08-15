@@ -1,25 +1,14 @@
 # Returns index of next zero (or error if none is found)
 # pointer must point to first byte where the search begins
 # This can be SIMD'd but it's way fast anyway.
-function next_zero(
-    p::Ptr{UInt8}, i::UInt32, lastindex::UInt32
-)::Union{UInt32,LibDeflateError}
-    while i ≤ lastindex
-        unsafe_load(p) === 0x00 && return i
-        i += UInt32(1)
-        p += 1
-    end
-    return LibDeflateErrors.gzip_string_not_null_terminated
+function bytes_until_zero(p::Ptr{UInt8}, lastindex::UInt32)::Union{UInt32,Nothing}
+    pos = @ccall memchr(p::Ptr{UInt8}, 0x00::Cint, UInt(lastindex)::Csize_t)::Ptr{Cchar}
+    pos == C_NULL ? nothing : (pos - p) % UInt32
 end
 
 "Check if there are any 0x00 bytes in a block of memory"
 function any_zeros(mem::ReadableMemory)::Bool
-    i = UInt(1)
-    while i ≤ sizeof(mem)
-        unsafe_load(pointer(mem), i % Int) === 0x00 && return true
-        i += UInt(1)
-    end
-    return false
+    bytes_until_zero(Ptr{UInt8}(pointer(mem)), sizeof(mem) % UInt32) !== nothing
 end
 
 # +---+---+---+---+==================================+
@@ -204,8 +193,9 @@ function unsafe_parse_gzip_header(
         # +=========================================+
         # |...original file name, zero-terminated...| (more-->)
         # +=========================================+
-        zero_pos = next_zero(ptr + index, index, max_len % UInt32)
-        zero_pos isa LibDeflateError && return zero_pos
+        until_zero = bytes_until_zero(ptr + index, max_len % UInt32)
+        until_zero === nothing && return LibDeflateErrors.gzip_string_not_null_terminated
+        zero_pos = index + until_zero
         zero_pos > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
         filename = index:(zero_pos - one(UInt32))
         index = zero_pos + one(UInt32)
@@ -214,8 +204,9 @@ function unsafe_parse_gzip_header(
     # Skip comment
     comment = nothing
     if FLAG_COMMENT
-        zero_pos = next_zero(ptr + index, index, max_len % UInt32)
-        zero_pos isa LibDeflateError && return zero_pos
+        until_zero = bytes_until_zero(ptr + index, max_len % UInt32)
+        until_zero === nothing && return LibDeflateErrors.gzip_string_not_null_terminated
+        zero_pos = index + until_zero
         zero_pos > max_len && return LibDeflateErrors.gzip_string_not_null_terminated
         comment = index:(zero_pos - one(UInt32))
         index = zero_pos + one(UInt32)
