@@ -9,6 +9,8 @@ Libdeflate is a heavily optimized implementation of the DEFLATE compression algo
 
 This package provides simple functionality for working with raw DEFLATE payloads, zlib and gzip data. It is intended for internal use by other packages, not to be used directly by users. Hence, its interface is somewhat small.
 
+:warning: This package ONLY works with in-memory buffers, and ONLY buffers with a length < 2^32 bytes :warning: 
+
 ### Interface
 Many functions have a  "safe" and an "unsafe" variant. The unsafe works with pointers, the safe attempts to convert Julia objects to `ReadableMemory` or `WriteableMemory`, which are simply structs containing pointers.
 When possible, use the safe variants as the overhead is rather small.
@@ -37,7 +39,7 @@ __Working with gzip files__
 * `is_valid_extra_data`: Check if some bytes are valid metadata for the gzip "extra" field.
 
 __Working with Libz files__
-* `(unsafe_)lib_decompress!`: Decompress zlib data.
+* `(unsafe_)zlib_decompress!`: Decompress zlib data.
 * `(unsafe_)zlib_compress!`: Compress zlib data
 
 __Miscellaneous__
