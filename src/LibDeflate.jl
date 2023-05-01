@@ -9,6 +9,10 @@ module LibDeflate
 
 using libdeflate_jll
 
+# Alias Base unions to avoid relying on internals
+const BitInteger = Union{Int128, Int16, Int32, Int64, Int8, UInt128, UInt16, UInt32, UInt64, UInt8}
+const IEEEFloat = Union{Float16, Float32, Float64}
+
 """
     Module LibDeflateErrors
 
@@ -78,11 +82,11 @@ function WriteableMemory(
     x::Union{
         Array{T},
         SubArray{T,N,<:Array{T},<:Tuple{Vararg{AbstractUnitRange}}} where N,
-        WriteableMemory,
     },
-) where {T<:Union{Base.BitInteger,Base.IEEEFloat}}
+) where {T<:Union{BitInteger, IEEEFloat}}
     return WriteableMemory(pointer(x), sizeof(x))
 end
+WriteableMemory(x::WriteableMemory) = x
 
 """
     ReadableMemory
