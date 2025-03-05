@@ -22,7 +22,7 @@ data_test_cases = [
 end
 
 @testset "Parse fields" begin
-    test_parse(v) = LibDeflate.parse_fields(pointer(v), UInt32(1), UInt16(length(v)))
+    test_parse(v) = GC.@preserve v LibDeflate.parse_fields(pointer(v), UInt32(1), UInt16(length(v)))
     for data in data_test_cases
         # We merely test it doesn't fail
         @test test_parse(data) !== nothing 
@@ -69,17 +69,17 @@ function test_header_example(data::Vector{UInt8}, header::LibDeflate.GzipHeader)
 end
 
 @testset "Parse header" begin
-    header = unsafe_parse_gzip_header(pointer(header_data), UInt(51))[2]
+    header = GC.@preserve header_data unsafe_parse_gzip_header(pointer(header_data), UInt(51))[2]
     test_header_example(header_data, header)
 
     header = parse_gzip_header(header_data)[2]
     test_header_example(header_data, header)
 
-    header = unsafe_parse_gzip_header(pointer(header_data), UInt(51), LibDeflate.GzipExtraField[])[2]
+    header = GC.@preserve header_data unsafe_parse_gzip_header(pointer(header_data), UInt(51), LibDeflate.GzipExtraField[])[2]
     test_header_example(header_data, header)
 
     header_data[end-2] = 0x01
-    @test unsafe_parse_gzip_header(pointer(header_data), UInt(51)) == LibDeflateErrors.gzip_string_not_null_terminated
+    @test GC.@preserve header_data unsafe_parse_gzip_header(pointer(header_data), UInt(51)) == LibDeflateErrors.gzip_string_not_null_terminated
     header_data[end-2] = 0x00
 end
 
@@ -98,7 +98,7 @@ test_filename = "testfile.foo"
     outdata = zeros(UInt8, 1250)
     compressor = Compressor()
     for data in test_data
-        n_bytes = unsafe_gzip_compress!(
+        n_bytes = GC.@preserve data outdata unsafe_gzip_compress!(
             compressor, pointer(outdata), UInt(length(outdata)),
             pointer(data), UInt(sizeof(data)),
             LibDeflate.ReadableMemory(test_comment), LibDeflate.ReadableMemory(test_filename),
@@ -137,7 +137,7 @@ complex_test_case = vcat(header_data, UInt8[
     for data in test_data
         compressed = transcode(GzipCompressor, data)
 
-        result = unsafe_gzip_decompress!(
+        result = GC.@preserve compressed unsafe_gzip_decompress!(
             decompressor, outdata, UInt(1001),
             pointer(compressed), UInt(length(compressed)),
         )
