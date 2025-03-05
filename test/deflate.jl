@@ -52,7 +52,7 @@ end
     ]
     outbuffer = zeros(UInt8, 512)
     for i in COMPRESSIBLE
-        v = unsafe_wrap(Array, Ptr{UInt8}(pointer(i)), sizeof(i))
+        GC.@preserve i v = unsafe_wrap(Array, Ptr{UInt8}(pointer(i)), sizeof(i))
         bytes = compress!(Compressor(), outbuffer, v)
         @test bytes < length(v)
     end
@@ -78,7 +78,8 @@ end
 # codeczlib. So we can just compare it to the unsafe one
 @testset "Safe CRC" begin
     for testdata in ["", "foo", "abracadabra!"]
-        @test crc32(collect(codeunits(testdata))) ==
+        GC.@preserve testdata @test crc32(collect(codeunits(testdata))) ==
+        crc32(collect(codeunits(testdata))) ==
             unsafe_crc32(pointer(testdata), ncodeunits(testdata))
     end
 end
@@ -105,31 +106,33 @@ end
     for i in INPUT_DATA
         v = Vector{UInt8}(i)
 
-        c_bytes_unsafe = unsafe_compress!(
-            compressor, pointer(unsafe_outbuffer), length(outbuffer), pointer(v), length(v)
-        )
-        c_bytes_safe = compress!(compressor, outbuffer, v)
+        GC.@preserve unsafe_outbuffer v unsafe_backbuffer1 unsafe_backbuffer2 begin
+            c_bytes_unsafe = unsafe_compress!(
+                compressor, pointer(unsafe_outbuffer), length(outbuffer), pointer(v), length(v)
+            )
+            c_bytes_safe = compress!(compressor, outbuffer, v)
 
-        @test c_bytes_unsafe == c_bytes_safe
-        @test unsafe_outbuffer[1:c_bytes_unsafe] == outbuffer[1:c_bytes_safe]
+            @test c_bytes_unsafe == c_bytes_safe
+            @test unsafe_outbuffer[1:c_bytes_unsafe] == outbuffer[1:c_bytes_safe]
 
-        d_bytes_unsafe1 = unsafe_decompress!(
-            Base.HasLength(),
-            decompressor,
-            pointer(unsafe_backbuffer1),
-            length(v),
-            pointer(unsafe_outbuffer),
-            c_bytes_unsafe,
-        )
+            d_bytes_unsafe1 = unsafe_decompress!(
+                Base.HasLength(),
+                decompressor,
+                pointer(unsafe_backbuffer1),
+                length(v),
+                pointer(unsafe_outbuffer),
+                c_bytes_unsafe,
+            )
 
-        d_bytes_unsafe2 = unsafe_decompress!(
-            Base.SizeUnknown(),
-            decompressor,
-            pointer(unsafe_backbuffer2),
-            length(unsafe_backbuffer2),
-            pointer(unsafe_outbuffer),
-            c_bytes_unsafe,
-        )
+            d_bytes_unsafe2 = unsafe_decompress!(
+                Base.SizeUnknown(),
+                decompressor,
+                pointer(unsafe_backbuffer2),
+                length(unsafe_backbuffer2),
+                pointer(unsafe_outbuffer),
+                c_bytes_unsafe,
+            )
+        end
 
         d_bytes_safe1 = decompress!(decompressor, backbuffer1, outbuffer, length(v))
         d_bytes_safe2 = decompress!(decompressor, backbuffer2, outbuffer)

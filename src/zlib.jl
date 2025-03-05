@@ -1,5 +1,5 @@
 # Single-line boxes show the number of bytes, double-lined have
-# a variable number of bytes. E.g. here: 1, 1, 4, N, 4.
+# a variable number of bytes. E.g. here: 1, 1, N, 4.
 # +---+---+===============+---+---+---+---+
 # |CMF|FLG|COMPRESSED DATA|     ADLER32   |    
 # +---+---+===============+---+---+---+---+
