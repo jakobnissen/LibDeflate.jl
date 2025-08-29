@@ -207,17 +207,14 @@ function _unsafe_decompress!(
     inlen::Integer,
     nptr::Ptr,
 )::Union{LibDeflateError,Nothing}
-    status = ccall(
-        (:libdeflate_deflate_decompress, libdeflate),
-        Csize_t,
-        (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t, Ptr{UInt}),
-        decompressor,
-        in_ptr,
-        inlen,
-        out_ptr,
-        out_len,
-        nptr,
-    )
+    status = @ccall gc_safe=true libdeflate.libdeflate_deflate_decompress(
+    	decompressor::Ptr{Nothing},
+    	in_ptr::Ptr{UInt8},
+    	inlen::Csize_t,
+    	out_ptr::Ptr{UInt8},
+    	out_len::Csize_t,
+    	nptr::Ptr{UInt},
+    )::Csize_t
     if status == Cint(1)
         return LibDeflateErrors.deflate_bad_payload
     elseif status == Cint(2)
@@ -344,16 +341,13 @@ See also: [`compress!`](@ref)
 function unsafe_compress!(
     compressor::Compressor, out_ptr::Ptr, n_out::Integer, in_ptr::Ptr, n_in::Integer
 )::Union{LibDeflateError,Int}
-    bytes = ccall(
-        (:libdeflate_deflate_compress, libdeflate),
-        Csize_t,
-        (Ptr{Nothing}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t),
-        compressor,
-        in_ptr,
-        n_in,
-        out_ptr,
-        n_out,
-    )
+    bytes = @ccall gc_safe=true libdeflate.libdeflate_deflate_compress(
+		compressor::Ptr{Nothing},
+		in_ptr::Ptr{UInt8},
+		n_in::Csize_t,
+		out_ptr::Ptr{UInt8},
+		n_out::Csize_t,
+	)::Csize_t
     iszero(bytes) && return LibDeflateErrors.deflate_insufficient_space
     return bytes % Int
 end
@@ -388,14 +382,11 @@ in the Julia standard library.
 See also: [`crc32`](@ref)
 """
 function unsafe_crc32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(0))
-    return ccall(
-        (:libdeflate_crc32, libdeflate),
-        UInt32,
-        (UInt32, Ptr{UInt8}, Csize_t),
-        start,
-        in_ptr,
-        n_in,
-    )
+    return @ccall gc_safe=true libdeflate.libdeflate_crc32(
+		start::UInt32,
+		in_ptr::Ptr{UInt8},
+		n_in::Csize_t,
+    )::UInt32
 end
 
 """
@@ -423,14 +414,11 @@ with seed `start` (default is 1).
 See also: [`adler32`](@ref)
 """
 function unsafe_adler32(in_ptr::Ptr, n_in::Integer, start::UInt32=UInt32(1))
-    return ccall(
-        (:libdeflate_adler32, libdeflate),
-        UInt32,
-        (UInt32, Ptr{UInt8}, Csize_t),
-        start,
-        in_ptr,
-        n_in,
-    )
+    return @ccall gc_safe=true libdeflate.libdeflate_adler32(
+		start::UInt32,
+		in_ptr::Ptr{UInt8},
+		n_in::Csize_t,
+	)::UInt32
 end
 
 """
