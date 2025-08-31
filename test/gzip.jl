@@ -81,6 +81,15 @@ end
     header_data[end-2] = 0x01
     @test GC.@preserve header_data unsafe_parse_gzip_header(pointer(header_data), UInt(51)) == LibDeflateErrors.gzip_string_not_null_terminated
     header_data[end-2] = 0x00
+
+    minimal_data = UInt8[0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00, 0x10, 0x20
+    ]
+    (header_len, header) = parse_gzip_header(minimal_data)
+    @test header_len == 18
+    ex = only(header.extra)
+    @test ex.tag == (0x42, 0x43)
+    @test ex.data == 17:18
 end
 
 
