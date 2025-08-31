@@ -185,7 +185,7 @@ function unsafe_parse_gzip_header(
         extra = parse_fields!(extra_vector, ptr + index + 2, index + UInt32(2), extra_len)
         extra isa LibDeflateError && return extra
         index += extra_len + UInt32(2)
-        index > max_len && return LibDeflateErrors.gzip_extra_too_long
+        (index - one(index)) > max_len && return LibDeflateErrors.gzip_extra_too_long
     end
 
     filename = nothing
